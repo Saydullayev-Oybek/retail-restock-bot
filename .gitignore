@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+*.xlsx
+!tests/fixtures/*.xlsx
+.DS_Store
+.idea/
+.vscode/
