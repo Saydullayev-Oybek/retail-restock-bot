@@ -85,7 +85,8 @@ class TestEnvExampleIsLoadable:
         # Kategoriya nomlari KIRILL va ichida probel bor — CSV bo'luvchi ularni
         # buzmasligi kerak
         assert settings.allowed_category_groups == [
-            "Поясные одежды", "Плечевые одежды", "Верхняя одежда", "Обувь",
+            "Поясные одежды", "Плечевые одежды", "Верхняя одежда",
+            "Обувь", "Кроссовки", "Нижнее белье",
         ]
         assert settings.announce_chat_id == -1001234567890
         assert settings.schedule_hour_minute == (9, 0)
