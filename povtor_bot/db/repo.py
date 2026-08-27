@@ -621,8 +621,35 @@ async def replace_stock_snapshot(
                 """,
                 [(*row, snapshot_date.isoformat()) for row in rows],
             )
+        # Yozilgan vaqtni SQLite'ning o'z soati bilan belgilaymiz — yoshi ham
+        # shu soatga nisbatan hisoblanadi, ya'ni vaqt mintaqasi chalkashmaydi
+        await db().execute(
+            """
+            INSERT INTO kv (key, value, updated_at)
+            VALUES ('stock_synced_at', datetime('now'), datetime('now'))
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value,
+                                            updated_at = excluded.updated_at
+            """
+        )
         await db().commit()
     return len(rows)
+
+
+async def stock_snapshot_rows() -> int:
+    async with db().execute("SELECT COUNT(*) AS n FROM stock_snapshot") as cursor:
+        return (await cursor.fetchone())["n"]
+
+
+async def stock_snapshot_age_hours() -> float | None:
+    """Qoldiq snapshoti necha soat oldin yozilgan. Bo'sh bo'lsa None."""
+    raw = await kv_get("stock_synced_at")
+    if not raw:
+        return None
+    async with db().execute(
+        "SELECT (julianday('now') - julianday(?)) * 24 AS h", (raw,)
+    ) as cursor:
+        row = await cursor.fetchone()
+    return float(row["h"]) if row and row["h"] is not None else None
 
 
 async def other_shops_with_stock(

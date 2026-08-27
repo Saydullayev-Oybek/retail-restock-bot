@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # uchun katta sahifa tekshiruvni sezilarli tezlashtiradi.
     # 1000 — hujjatdagi maksimum. 2000 ham sinovda toza ishladi.
     billz_page_limit: int = 1000
+    # Bir vaqtda nechta sahifa so'ralsin. Tezlik chegarasini OSHIRMAYDI —
+    # token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
+    # vaqtlari ustma-ust tushadi.
+    billz_concurrency: int = 4
+    # Qoldiq snapshoti necha soat "yangi" hisoblansin. U eng katta hisobot
+    # (vaqtning ~57% i), lekin faqat "boshqa filialda bormi?" savoliga
+    # javob beradi — bir necha soatlik eskilik zarar qilmaydi.
+    stock_refresh_hours: int = 6
 
     # Sklad bitta emas: tarmoqda import skladi va sezoni o'tgan tovar skladi bor.
     # Qaysilari "yangi partiya" manbai hisoblanishi shu ro'yxat bilan belgilanadi.

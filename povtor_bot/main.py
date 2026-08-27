@@ -49,7 +49,11 @@ def build_billz(settings: Settings) -> tuple[BillzClient, BillzGateway]:
         kv_set=repo.kv_set,
         raw_sink=repo.save_raw,
     )
-    return client, BillzGateway(client, page_limit=settings.billz_page_limit)
+    return client, BillzGateway(
+        client,
+        page_limit=settings.billz_page_limit,
+        concurrency=settings.billz_concurrency,
+    )
 
 
 async def run() -> None:

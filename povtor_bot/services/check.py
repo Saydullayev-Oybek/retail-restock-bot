@@ -46,6 +46,10 @@ class CheckResult:
     usd_rate: float = 0.0
     transfer_rows: int = 0
     synced_skus: int = 0
+    # Menyuda kutayotgan bandlar soni. "total_found" har tekshiruvda tebranadi
+    # (yangi partiya kelishi, qaytarish, oynadan chiqish), menejer uchun esa
+    # muhimi — qancha ish qolgani.
+    open_count: int = 0
     error: str = ""
 
     @property
@@ -219,13 +223,25 @@ async def run_check(
     synced = await sync_variants(gateway, skus, settings)
     variants = await repo.variant_map()
 
+    # Qoldiq — eng katta hisobot (sahifalarning ~57% i), lekin u faqat
+    # "boshqa filialda bormi?" savoliga javob beradi. Bir necha soatlik
+    # eskilik zarar qilmaydi, shuning uchun har tekshiruvda qayta o'qilmaydi.
+    stock_age = await repo.stock_snapshot_age_hours()
+    refresh_stock = stock_age is None or stock_age >= settings.stock_refresh_hours
+
     try:
         sales = await gateway.sales(start=start, end=today, shop_ids=filial_ids)
-        stock = await gateway.stock(report_date=today, shop_ids=filial_ids)
+        stock = (
+            await gateway.stock(report_date=today, shop_ids=filial_ids)
+            if refresh_stock else []
+        )
         usd_rate = await gateway.usd_rate()
     except Exception as exc:  # noqa: BLE001
         log.exception("Billz'dan ma'lumot olinmadi")
         return CheckResult(0, 0, 0, error=f"Billz xatosi: {exc}")
+
+    if not refresh_stock:
+        log.info("Qoldiq snapshoti yangi (%.1f soat) — qayta o'qilmadi", stock_age)
 
     colored_transfers = _apply_color(warehouse_transfers, variants)
     colored_sales = _apply_color(sales, variants)
@@ -242,18 +258,21 @@ async def run_check(
         for info in index.values()
     )
 
-    # Qoldiq snapshot — "BOZORDA YO'Q" da transfer taklifi shu yerdan chiqadi
-    await repo.replace_stock_snapshot(
-        [
-            (
-                row.shop_id, shop_names.get(row.shop_id, row.shop_id), row.sku,
-                row.color or _variant_color(variants, row.product_id), row.quantity,
-            )
-            for row in stock
-            if row.quantity > 0
-        ],
-        today,
-    )
+    # Qoldiq snapshot — "BOZORDA YO'Q" da transfer taklifi shu yerdan chiqadi.
+    # Yangilanmagan bo'lsa eskisi saqlanib qoladi (bo'sh ro'yxat bilan
+    # almashtirib yuborish transfer taklifini o'chirib qo'yardi).
+    if refresh_stock:
+        await repo.replace_stock_snapshot(
+            [
+                (
+                    row.shop_id, shop_names.get(row.shop_id, row.shop_id), row.sku,
+                    row.color or _variant_color(variants, row.product_id), row.quantity,
+                )
+                for row in stock
+                if row.quantity > 0
+            ],
+            today,
+        )
 
     candidates: list[Candidate] = detect_candidates(
         today=today,
@@ -276,7 +295,8 @@ async def run_check(
     return CheckResult(
         new_count=new_count,
         total_found=len(candidates),
-        stock_rows=len(stock),
+        stock_rows=len(stock) if refresh_stock else await repo.stock_snapshot_rows(),
+        open_count=await repo.open_count(),
         usd_rate=usd_rate,
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,

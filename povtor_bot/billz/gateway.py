@@ -12,6 +12,7 @@ ni yiqitmasligi kerak.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime
 from typing import Any
@@ -34,6 +35,10 @@ KIND_FIELD_NAMES = ("вид", "kind", "tur")
 # 1000 — hujjatda ko'rsatilgan maksimum (product-general-table uchun).
 _PAGE_LIMIT = 1000
 _MAX_PAGES = 200   # cheksiz sikldan himoya
+# Bir vaqtda nechta sahifa so'ralsin. Tezlik chegarasini oshirmaydi —
+# token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
+# vaqtlari ustma-ust tushadi.
+_CONCURRENCY = 4
 
 
 def _pick(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -181,9 +186,13 @@ def _count_of(payload: dict[str, Any]) -> int:
 class BillzGateway:
     """Yuqori darajali chaqiruvlar — hammasi domen modellarini qaytaradi."""
 
-    def __init__(self, client: BillzClient, page_limit: int = _PAGE_LIMIT) -> None:
+    def __init__(
+        self, client: BillzClient, page_limit: int = _PAGE_LIMIT,
+        concurrency: int = _CONCURRENCY,
+    ) -> None:
         self._client = client
         self._page_limit = max(1, page_limit)
+        self._concurrency = max(1, concurrency)
 
     # ───────────────────────── sahifalash ─────────────────────────
 
@@ -198,29 +207,44 @@ class BillzGateway:
         qoladi va natija noto'g'ri chiqadi — xato ham berilmaydi.
 
         Bu real ishga tushirishda kuzatildi: bir tekshiruv 91 nomzod topdi,
-        30 daqiqadan keyingisi xuddi shu ma'lumotda 7 ta. Sabab — sotuv
-        hisobotining 25 sahifasidan bir nechtasi o'qilmay qolgani.
+        30 daqiqadan keyingisi xuddi shu ma'lumotda 7 ta.
 
-        Narxi: har hisobot uchun bitta qo'shimcha (bo'sh) so'rov.
+        Sahifalar GURUH-GURUH parallel so'raladi. Nega: Billz hisobot
+        dvigateli bitta sahifani ~3 sekund hisoblaydi, va ketma-ket
+        so'raganda bot shuncha vaqt bo'sh kutadi — haqiqiy tezlik 0.3 so'rov/sek
+        bo'lib qoladi, Billz ruxsat bergan 2 dan olti barobar kam. Parallel
+        so'rovlar tezlik chegarasini OSHIRMAYDI (token-bucket baribir 1.5 rps
+        da ushlab turadi), faqat kutish vaqtlari ustma-ust tushadi.
+
+        Narxi: oxirgi guruhda bir necha ortiqcha (bo'sh) so'rov ketishi mumkin.
         """
         limit = limit or self._page_limit
         collected: list[dict[str, Any]] = []
-        seen_pages = 0
-        for page in range(1, _MAX_PAGES + 1):
-            payload = await self._client.get(
-                path, {**params, "page": page, "limit": limit}
-            )
-            rows = _rows_of(payload, *keys)
-            if not rows:
+        page = 1
+        while page <= _MAX_PAGES:
+            batch = range(page, min(page + self._concurrency, _MAX_PAGES + 1))
+            payloads = await asyncio.gather(*[
+                self._client.get(path, {**params, "page": p, "limit": limit})
+                for p in batch
+            ])
+            finished = False
+            for payload in payloads:
+                rows = _rows_of(payload, *keys)
+                if not rows:
+                    # Shu sahifadan keyingilari e'tiborga olinmaydi: ular
+                    # bo'shlikdan keyin kelgan, ya'ni ma'lumot tugagan
+                    finished = True
+                    break
+                collected.extend(rows)
+            if finished:
                 break
-            collected.extend(rows)
-            seen_pages = page
+            page += len(batch)
         else:
             log.warning(
                 "%s: %d sahifadan oshdi, qolgani o'qilmadi (%d qator yig'ildi)",
                 path, _MAX_PAGES, len(collected),
             )
-        log.debug("%s: %d sahifa, %d qator", path, seen_pages, len(collected))
+        log.debug("%s: %d qator", path, len(collected))
         return collected
 
     # ───────────────────────── metodlar ─────────────────────────

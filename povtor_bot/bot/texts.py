@@ -133,13 +133,15 @@ def check_report(result: Any) -> str:
         return f"⚠️ Tekshiruv bajarilmadi.\n<code>{esc(result.error)}</code>"
     lines = [
         "✅ <b>Tekshiruv tugadi</b>",
-        f"Topilgan nomzodlar: <b>{result.total_found}</b>",
         f"Yangi qo'shildi: <b>{result.new_count}</b>",
-        f"Qoldiq qatorlari: {result.stock_rows}",
+        f"Hal qilinmagan: <b>{getattr(result, 'open_count', 0)}</b>",
+        "",
+        f"<i>tekshirildi: {result.total_found} nomzod · "
+        f"qoldiq {result.stock_rows} qator</i>",
     ]
     if result.usd_rate:
-        lines.append(f"USD kursi: {result.usd_rate:g}")
+        lines.append(f"<i>USD kursi: {result.usd_rate:g}</i>")
     if result.new_count == 0 and result.total_found:
-        lines.append("\n<i>Yangi nomzod yo'q — hammasi allaqachon bazada.</i>")
+        lines.append("\n<i>Yangi nomzod yo'q — hammasi allaqachon ro'yxatda.</i>")
     lines.append("\n/buyurtma — ro'yxatni ochish")
     return "\n".join(lines)

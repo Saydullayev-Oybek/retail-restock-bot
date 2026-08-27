@@ -40,7 +40,7 @@ Skript do'konlar ro'yxatini `id  nom` ko'rinishida chiqaradi.
 
 | Buyruq | Ish |
 |---|---|
-| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi |
+| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi. Hisobotda **"Hal qilinmagan"** asosiy raqam: "tekshirildi" har safar tebranadi (yangi partiya kelishi, qaytarish, oynadan chiqish), menejer uchun esa qancha ish qolgani muhim |
 | `/buyurtma` | Kaskadli menyu: kategoriya → ta'minotchi → artikul → karta |
 | `/yangi` | Yangi kelgan tovarlarni umumiy guruhga e'lon qiladi |
 | `/export` | Kunning javoblarini Excel'ga chiqaradi (har filialga alohida varaq) |
@@ -219,6 +219,20 @@ Manba taqsimoti (30 kun, filiallarga kelgan 20 522 qator):
 | `СКЛАД ПРИХОДА` (import) | 56.8% |
 | `BUTTON СКЛАД MEN` (sezon) | 12.9% |
 | filiallardan | ~30% |
+
+### Tezlik
+
+Billz hisobot dvigateli bitta sahifani ~3 sekund hisoblaydi, va bu vaqt
+**qator soniga bog'liq emas** (o'lchov: 500 qator 4.2s, 2000 qator 3.3s).
+Shundan uchta qaror kelib chiqadi:
+
+| Sozlama | Nima qiladi |
+|---|---|
+| `BILLZ_PAGE_LIMIT=1000` | Katta sahifa deyarli bepul — so'rovlar soni yarmiga tushadi |
+| `BILLZ_CONCURRENCY=4` | Sahifalar guruh-guruh so'raladi. Tezlik chegarasini **oshirmaydi** (token-bucket baribir 1.5 rps da ushlab turadi) — faqat Billz javobini kutish vaqtlari ustma-ust tushadi. Aks holda bot 0.3 rps da ishlaydi, Billz ruxsat bergan 2 dan olti barobar kam |
+| `STOCK_REFRESH_HOURS=6` | Qoldiq hisoboti sahifalarning ~57% i, lekin faqat "boshqa filialda bormi?" uchun kerak — bir necha soatlik eskilik zarar qilmaydi |
+
+Natija (kunlik run, katalog keshda): **208s → 69s**.
 
 ### Katalog to'liq tortilmaydi
 

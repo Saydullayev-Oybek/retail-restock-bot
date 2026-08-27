@@ -251,9 +251,19 @@ class TestPagination:
             rows = self.pages[index] if index < len(self.pages) else []
             return {"rows": rows, "count": len(rows)}
 
-    def _gateway(self, pages: list[list[dict]], page_limit: int = 500):
+    def _gateway(self, pages: list[list[dict]], page_limit: int = 500,
+                 concurrency: int = 1):
+        """concurrency=1 — sahifalash mantig'ini aniq tekshirish uchun.
+
+        Guruh-guruh so'ralganda oxirida bir necha ortiqcha (bo'sh) so'rov
+        ketadi, shuning uchun so'rovlar SONINI tekshiradigan testlar ketma-ket
+        rejimda yoziladi. Parallel rejim alohida sinaladi.
+        """
         client = self.StubClient(pages)
-        return gw.BillzGateway(client, page_limit=page_limit), client  # type: ignore[arg-type]
+        return (
+            gw.BillzGateway(client, page_limit=page_limit, concurrency=concurrency),
+            client,
+        )  # type: ignore[arg-type]
 
     async def test_configured_page_limit_is_used(self) -> None:
         """Sahifa hajmi .env dan keladi — Billz vaqtni har so'rovga sarflaydi,
@@ -301,6 +311,31 @@ class TestPagination:
         gateway, client = self._gateway([[]])
         assert await gateway._paginate("/x", {}, "rows", limit=10) == []
         assert len(client.requested) == 1
+
+    async def test_concurrent_batches_keep_order_and_stop_correctly(self) -> None:
+        """Parallel so'ralganda ham tartib va to'xtash nuqtasi to'g'ri bo'lsin."""
+        pages = [[{"i": p * 10 + j} for j in range(10)] for p in range(7)] + [[]]
+        gateway, client = self._gateway(pages, page_limit=10, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == [p * 10 + j for p in range(7) for j in range(10)]
+
+    async def test_pages_after_the_empty_one_are_discarded(self) -> None:
+        """Bo'shlikdan keyin kelgan sahifa e'tiborga olinmaydi.
+
+        Guruhda 4 ta sahifa birga so'raladi; agar 2-si bo'sh bo'lsa, 3 va 4
+        chi qanday javob qaytarsa ham ma'lumot tugagan hisoblanadi.
+        """
+        pages = [[{"i": 1}], [], [{"i": 99}], [{"i": 98}]]
+        gateway, _ = self._gateway(pages, page_limit=10, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == [1]
+
+    async def test_concurrency_does_not_lose_the_tail(self) -> None:
+        """Sahifalar soni guruh hajmiga bo'linmasa ham hammasi o'qiladi."""
+        pages = [[{"i": p}] for p in range(9)] + [[]]
+        gateway, _ = self._gateway(pages, page_limit=1, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == list(range(9))
 
     async def test_exact_multiple_stops_at_empty_page(self) -> None:
         """Oxirgi sahifa aynan to'la bo'lsa — bo'sh sahifa to'xtatadi."""

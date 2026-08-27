@@ -189,3 +189,37 @@ class TestAgeLabel:
             [row(detected_date="2026-08-19")], today=TODAY, stale_after_days=5
         )
         assert "⚠️ 8 kun oldin" in text
+
+
+class TestCheckReportCounts:
+    """Hisobotdagi raqamlar menejer uchun tushunarli bo'lishi kerak.
+
+    "Topilgan" har tekshiruvda tebranadi (yangi partiya kelishi, qaytarish,
+    oynadan chiqish — hammasi real ma'lumotda kuzatilgan). Menejer uchun
+    muhimi — qancha ISH qolgani.
+    """
+
+    class Result:
+        def __init__(self, **kw) -> None:
+            self.__dict__.update(
+                {"ok": True, "total_found": 0, "new_count": 0, "stock_rows": 0,
+                 "usd_rate": 0.0, "open_count": 0, "error": ""} | kw
+            )
+
+    def test_open_count_is_shown(self) -> None:
+        text = texts.check_report(
+            self.Result(total_found=94, new_count=2, open_count=97)
+        )
+        assert "Hal qilinmagan" in text and "97" in text
+
+    def test_found_count_is_secondary(self) -> None:
+        """Tekshirilgan soni ham ko'rsatiladi, lekin ikkinchi darajada."""
+        text = texts.check_report(self.Result(total_found=94, new_count=0, open_count=97))
+        assert "94" in text
+        assert text.index("Hal qilinmagan") < text.index("94")
+
+    def test_missing_open_count_does_not_break(self) -> None:
+        """Eski CheckResult bilan ham yiqilmasin."""
+        class Old:
+            ok, total_found, new_count, stock_rows, usd_rate, error = True, 5, 1, 0, 0.0, ""
+        assert "Tekshiruv tugadi" in texts.check_report(Old())

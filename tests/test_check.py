@@ -380,3 +380,48 @@ class TestMultipleWarehouses:
         settings = make_settings(warehouse_shop_ids=[WAREHOUSE, self.SEASON])
         ids, _ = await check_service.resolve_filial_ids(self._gateway(), settings)
         assert ids == ["shop1"]
+
+
+class TestStockRefreshCache:
+    """Qoldiq hisoboti eng katta (sahifalarning ~57% i), lekin u faqat
+    "boshqa filialda bormi?" savoliga javob beradi — bir necha soatlik
+    eskilik zarar qilmaydi."""
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 5)],
+            stock=[StockRow("shop2", "1", "Белый", 4)],
+            products=[a_product(sku="1")],
+        )
+
+    async def test_first_run_fetches_stock(self) -> None:
+        gw = self._gateway()
+        await check_service.run_check(gw, make_settings(), today=TODAY)
+        assert "stock" in gw.calls
+        assert await repo.stock_snapshot_rows() == 1
+
+    async def test_second_run_skips_stock(self) -> None:
+        settings = make_settings(stock_refresh_hours=6)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        gw2 = self._gateway()
+        result = await check_service.run_check(gw2, settings, today=TODAY)
+        assert "stock" not in gw2.calls
+        # eski snapshot saqlanib qoladi — transfer taklifi ishlashda davom etadi
+        assert await repo.stock_snapshot_rows() == 1
+        assert result.stock_rows == 1
+
+    async def test_transfer_hint_still_works_after_skip(self) -> None:
+        settings = make_settings(stock_refresh_hours=6)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        rows = await repo.other_shops_with_stock("1", "Белый", exclude_shop_id="shop1")
+        assert [(r["shop_name"], r["quantity"]) for r in rows] == [("BERUNIY", 4)]
+
+    async def test_zero_hours_always_refreshes(self) -> None:
+        settings = make_settings(stock_refresh_hours=0)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        gw2 = self._gateway()
+        await check_service.run_check(gw2, settings, today=TODAY)
+        assert "stock" in gw2.calls
