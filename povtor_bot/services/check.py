@@ -201,6 +201,10 @@ async def run_check(
     # FAQAT sklad -> filial. Filiallar bir-biriga ham yuboradi (real ma'lumotda
     # ~30%), lekin bu "yangi partiya keldi" degani emas — sotilmay qolgan
     # tovarni qayta taqsimlash.
+    #
+    # Loyiha egasi tasdiqlagan (2026-08-27): "filialdan filialga transfer
+    # qilingan tovar tez sotilsa ham bozordan olinmaydi — faqat skladdan
+    # kelgani hisoblanadi".
     warehouse_transfers = [
         row for row in transfers
         if row.from_shop_id in warehouses and row.to_shop_id in filials

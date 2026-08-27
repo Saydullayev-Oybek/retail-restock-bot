@@ -66,6 +66,22 @@ days_to_50   = kunlik sotuvlar 50% ga yetgan birinchi kun (0 = kelgan kuni)
 **Nomzod** ⇔ `base_qty ≥ MIN_BASE_QTY (5)` **VA** `o'tgan kun ≤ WINDOW_DAYS (5)`
 **VA** `percent ≥ 50%` **VA** kategoriya `ALLOWED_CATEGORY_GROUPS` ichida.
 
+Kuzatiladigan kategoriyalar (skladdan filiallarga kelgan hajm, 30 kun):
+
+| Kategoriya | Ulush | Kuzatiladi |
+|---|---|---|
+| Плечевые одежды | 28.7% | ✅ |
+| Нижнее белье | 24.4% | ✅ |
+| Поясные одежды | 23.5% | ✅ |
+| Обувь | 10.0% | ✅ |
+| Верхняя одежда | 7.7% | ✅ |
+| Кроссовки | 2.4% | ✅ |
+| Аксессуары | 3.3% | ❌ |
+
+Ya'ni skladdan kelgan tovarning **~97%** i qamrab olinadi. Qolgan
+kategoriyalar (parfyumeriya, kosmetika, bijuteriya, paket, atelye va h.k.)
+POVTOR jarayoniga kirmaydi.
+
 `MIN_BASE_QTY` nima uchun kerak: skladdan 1-2 donalik "to'ldirish" transferlari
 juda ko'p keladi va ularda "100% sotildi" statistik ma'noga ega emas. Namuna
 POVTOR faylida Asos hech qachon 5 dan kichik emas (128 qatordan 74 tasi aynan 5).
@@ -192,6 +208,9 @@ o'lchovda filiallarga kelgan transferlarning **~30%** i boshqa filialdan. Bu
 sotilmay qolgan tovarni qayta taqsimlash, ya'ni qayta buyurtmaga asos emas
 (aksincha — tovar boshqa joyda sotilmagan). Shuning uchun `from_shop_id`
 majburiy tarzda `WAREHOUSE_SHOP_IDS` ro'yxati bilan solishtiriladi.
+
+Bu qoida biznes tomonidan tasdiqlangan: *"filialdan filialga transfer qilingan
+tovar tez sotilsa ham bozordan olinmaydi — faqat skladdan kelgani"*.
 
 Manba taqsimoti (30 kun, filiallarga kelgan 20 522 qator):
 
