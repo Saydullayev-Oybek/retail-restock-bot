@@ -352,7 +352,12 @@ class TestMultipleWarehouses:
             ],
         )
 
-    async def test_only_listed_warehouses_count(self) -> None:
+    async def test_season_warehouse_is_excluded_by_default(self) -> None:
+        """Biznes qarori: sezon skladidan qaytgan tovar nomzod bo'lmaydi.
+
+        POVTOR faqat YANGI kelgan tovar uchun — sezoni o'tgan kolleksiyani
+        bozordan qayta topib bo'lmaydi, ya'ni "yana ol" tavsiyasi ma'nosiz.
+        """
         settings = make_settings(warehouse_shop_ids=[WAREHOUSE], filial_shop_ids=["shop1"])
         await check_service.run_check(self._gateway(), settings, today=TODAY)
         skus = {r["sku"] for r in await repo.card_items("import", TODAY)}
