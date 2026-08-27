@@ -14,7 +14,7 @@ from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_TAKEN
 from povtor_bot.db import repo
 from povtor_bot.services import export
 
-from .conftest import TODAY, make_candidate
+from .conftest import make_candidate
 
 pytestmark = pytest.mark.usefixtures("database")
 
