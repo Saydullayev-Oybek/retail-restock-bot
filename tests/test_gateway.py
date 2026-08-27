@@ -261,30 +261,29 @@ class TestPagination:
         rows = await gateway._paginate("/x", {}, "rows", limit=3)
         assert [r["i"] for r in rows] == [0, 1, 2, 3, 4, 5, 6]
 
-    async def test_server_capped_page_size_does_not_truncate(self) -> None:
-        """500 so'raldi, server 100 qaytardi — qolgan sahifalar ham o'qilishi SHART.
+    async def test_short_page_in_the_middle_does_not_stop(self) -> None:
+        """⭐ Billz o'rtadagi sahifada kam qator qaytarishi mumkin.
 
-        Bu aynan jim ma'lumot yo'qotish holati: agar to'xtash sharti so'ralgan
-        limit'ga solishtirilsa, katalogning 100 tadan keyingisi umuman
-        o'qilmasdan qolardi.
+        Real ishga tushirishda aynan shu jim ma'lumot yo'qotishga olib keldi:
+        bir tekshiruv 91 nomzod topdi, keyingisi xuddi shu ma'lumotda 7 ta.
         """
-        pages = [
-            [{"i": i} for i in range(100)],
-            [{"i": i} for i in range(100, 200)],
-            [{"i": 200}],
-        ]
-        gateway, client = self._gateway(pages)
-        rows = await gateway._paginate("/v2/products", {}, "rows", limit=500)
-        assert len(rows) == 201
-        assert [p["page"] for p in client.requested] == [1, 2, 3]
-
-    async def test_stops_on_short_page(self) -> None:
         gateway, client = self._gateway([
-            [{"i": i} for i in range(10)], [{"i": 10}],
+            [{"i": i} for i in range(10)],     # to'la
+            [{"i": 100}, {"i": 101}],          # QISQA — lekin oxirgisi emas
+            [{"i": i} for i in range(200, 210)],
+            [],                                 # haqiqiy oxiri
+        ])
+        rows = await gateway._paginate("/x", {}, "rows", limit=10)
+        assert len(rows) == 22                 # qisqa sahifada to'xtamadi
+        assert [p["page"] for p in client.requested] == [1, 2, 3, 4]
+
+    async def test_last_short_page_then_empty(self) -> None:
+        gateway, client = self._gateway([
+            [{"i": i} for i in range(10)], [{"i": 10}], [],
         ])
         rows = await gateway._paginate("/x", {}, "rows", limit=10)
         assert len(rows) == 11
-        assert len(client.requested) == 2      # 3-sahifa so'ralmadi
+        assert len(client.requested) == 3      # bo'sh sahifa bilan tasdiqlandi
 
     async def test_stops_on_empty_first_page(self) -> None:
         gateway, client = self._gateway([[]])
@@ -299,6 +298,18 @@ class TestPagination:
         rows = await gateway._paginate("/x", {}, "rows", limit=5)
         assert len(rows) == 10
         assert [p["page"] for p in client.requested] == [1, 2, 3]
+
+    async def test_server_capped_pages_are_all_read(self) -> None:
+        """500 so'raldi, server 100 qaytardi — hammasi o'qilishi kerak."""
+        gateway, client = self._gateway([
+            [{"i": i} for i in range(100)],
+            [{"i": i} for i in range(100, 200)],
+            [{"i": 200}],
+            [],
+        ])
+        rows = await gateway._paginate("/v2/products", {}, "rows", limit=500)
+        assert len(rows) == 201
+        assert [p["page"] for p in client.requested] == [1, 2, 3, 4]
 
     async def test_params_are_preserved_across_pages(self) -> None:
         gateway, client = self._gateway([[{"i": 0}], []])

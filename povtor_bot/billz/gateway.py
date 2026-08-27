@@ -185,21 +185,21 @@ class BillzGateway:
     async def _paginate(
         self, path: str, params: dict[str, Any], *keys: str, limit: int = _PAGE_LIMIT
     ) -> list[dict[str, Any]]:
-        """Barcha sahifalarni yig'adi.
+        """Barcha sahifalarni yig'adi. To'xtash sharti — BO'SH sahifa.
 
-        Ikkita nozik joy bor:
+        Nega "qisqa sahifa = oxirgi sahifa" emas: Billz o'rtadagi sahifada
+        so'ralganidan kam qator qaytarishi mumkin (yuk, throttling, ichki
+        filtrlash). Qisqa sahifada to'xtasak, qolgan sahifalar JIM o'qilmay
+        qoladi va natija noto'g'ri chiqadi — xato ham berilmaydi.
 
-        1. `count` ga tayanmaymiz — ba'zi Billz hisobotlarida u umumiy son emas,
-           sahifadagi qatorlar soni bo'lib chiqadi.
+        Bu real ishga tushirishda kuzatildi: bir tekshiruv 91 nomzod topdi,
+        30 daqiqadan keyingisi xuddi shu ma'lumotda 7 ta. Sabab — sotuv
+        hisobotining 25 sahifasidan bir nechtasi o'qilmay qolgani.
 
-        2. "Qisqa sahifa = oxirgi sahifa" qoidasi SO'RALGAN limit'ga emas,
-           serverning HAQIQIY sahifa hajmiga solishtiriladi. Billz limit'ni
-           o'zicha kamaytirishi mumkin (masalan 500 so'ralganda 100 qaytaradi);
-           so'ralgan qiymatga solishtirsak birinchi sahifadanoq to'xtab,
-           katalogning qolganini JIM o'tkazib yuborardik.
+        Narxi: har hisobot uchun bitta qo'shimcha (bo'sh) so'rov.
         """
         collected: list[dict[str, Any]] = []
-        page_size: int | None = None
+        seen_pages = 0
         for page in range(1, _MAX_PAGES + 1):
             payload = await self._client.get(
                 path, {**params, "page": page, "limit": limit}
@@ -208,16 +208,13 @@ class BillzGateway:
             if not rows:
                 break
             collected.extend(rows)
-            if page_size is None:
-                page_size = len(rows)
-                if page_size < limit:
-                    log.debug(
-                        "%s: limit=%d so'raldi, server %d qaytardi", path, limit, page_size
-                    )
-            if len(rows) < page_size:
-                break
+            seen_pages = page
         else:
-            log.warning("%s: %d sahifadan oshdi, qolgani o'qilmadi", path, _MAX_PAGES)
+            log.warning(
+                "%s: %d sahifadan oshdi, qolgani o'qilmadi (%d qator yig'ildi)",
+                path, _MAX_PAGES, len(collected),
+            )
+        log.debug("%s: %d sahifa, %d qator", path, seen_pages, len(collected))
         return collected
 
     # ───────────────────────── metodlar ─────────────────────────
