@@ -73,14 +73,15 @@ async def resolve_filial_ids(
 ) -> tuple[list[str], dict[str, str]]:
     """Kuzatiladigan filiallar ro'yxati va id -> nom lug'ati.
 
-    FILIAL_SHOP_IDS bo'sh bo'lsa — SKLAD'dan boshqa hamma do'kon olinadi.
+    FILIAL_SHOP_IDS bo'sh bo'lsa — skladlardan boshqa hamma do'kon olinadi.
     """
     shops = await gateway.shops()
     names = {shop.id: shop.name for shop in shops}
     if settings.filial_shop_ids:
         ids = [sid for sid in settings.filial_shop_ids if sid]
     else:
-        ids = [shop.id for shop in shops if shop.id != settings.warehouse_shop_id]
+        warehouses = set(settings.warehouse_shop_ids)
+        ids = [shop.id for shop in shops if shop.id not in warehouses]
     return ids, names
 
 
@@ -171,8 +172,9 @@ async def run_check(
     today = today or date.today()
     cfg = rule_config(settings)
 
-    if not settings.warehouse_shop_id:
-        return CheckResult(0, 0, 0, error="WAREHOUSE_SHOP_ID sozlanmagan")
+    warehouses = set(settings.warehouse_shop_ids)
+    if not warehouses:
+        return CheckResult(0, 0, 0, error="WAREHOUSE_SHOP_IDS sozlanmagan")
 
     try:
         filial_ids, shop_names = await resolve_filial_ids(gateway, settings)
@@ -190,18 +192,18 @@ async def run_check(
         # shop_ids ga SKLAD ham qo'shiladi, aks holda jo'natuvchi tomoni
         # hisobotga tushmasligi mumkin
         transfers = await gateway.transfers(
-            start=start, end=today,
-            shop_ids=[*filial_ids, settings.warehouse_shop_id],
+            start=start, end=today, shop_ids=[*filial_ids, *warehouses],
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("Transfer hisoboti olinmadi")
         return CheckResult(0, 0, 0, error=f"Billz xatosi: {exc}")
 
-    # FAQAT SKLAD -> filial. Filiallar bir-biriga ham yuboradi, lekin bu
-    # "yangi partiya keldi" degani emas.
+    # FAQAT sklad -> filial. Filiallar bir-biriga ham yuboradi (real ma'lumotda
+    # ~30%), lekin bu "yangi partiya keldi" degani emas — sotilmay qolgan
+    # tovarni qayta taqsimlash.
     warehouse_transfers = [
         row for row in transfers
-        if row.from_shop_id == settings.warehouse_shop_id and row.to_shop_id in filials
+        if row.from_shop_id in warehouses and row.to_shop_id in filials
     ]
     log.info(
         "Transfer: jami %d, skladdan filialga %d",
@@ -285,15 +287,15 @@ async def recent_arrivals(
     Qaytadi: (tovar bo'yicha guruhlangan ro'yxat, xato matni).
     """
     today = today or date.today()
-    if not settings.warehouse_shop_id:
-        return [], "WAREHOUSE_SHOP_ID sozlanmagan"
+    warehouses = set(settings.warehouse_shop_ids)
+    if not warehouses:
+        return [], "WAREHOUSE_SHOP_IDS sozlanmagan"
 
     try:
         filial_ids, shop_names = await resolve_filial_ids(gateway, settings)
         start = today - timedelta(days=max(0, settings.announce_lookback_days - 1))
         transfers = await gateway.transfers(
-            start=start, end=today,
-            shop_ids=[*filial_ids, settings.warehouse_shop_id],
+            start=start, end=today, shop_ids=[*filial_ids, *warehouses],
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("Yangi kelgan tovarlar olinmadi")
@@ -302,7 +304,7 @@ async def recent_arrivals(
     filials = set(filial_ids)
     fresh = [
         row for row in transfers
-        if row.from_shop_id == settings.warehouse_shop_id
+        if row.from_shop_id in warehouses
         and row.to_shop_id in filials
         and row.quantity > 0
     ]

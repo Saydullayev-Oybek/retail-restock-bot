@@ -73,7 +73,7 @@ class RecordingBot(Bot):
 
 def settings_for(**overrides) -> Settings:
     base = dict(
-        bot_token="T", allowed_user_ids=[MANAGER], warehouse_shop_id="sklad-uuid",
+        bot_token="T", allowed_user_ids=[MANAGER], warehouse_shop_ids=["sklad-uuid"],
         billz_secret_token="s",
     )
     base.update(overrides)

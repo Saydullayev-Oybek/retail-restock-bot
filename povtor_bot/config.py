@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     billz_platform_id: str = "7d4a4c38-dd84-4902-b744-0488b80a4c01"
     billz_rate_limit_rps: float = 1.5
 
-    warehouse_shop_id: str = ""
+    # Sklad bitta emas: tarmoqda import skladi va sezoni o'tgan tovar skladi bor.
+    # Qaysilari "yangi partiya" manbai hisoblanishi shu ro'yxat bilan belgilanadi.
+    warehouse_shop_ids: CsvStrs = Field(default_factory=list)
     filial_shop_ids: CsvStrs = Field(default_factory=list)
     # Billz `main_image_url` da faqat fayl nomini qaytaradi ("<uuid>.jpg").
     # To'liq manzil uchun CDN bazasi kerak; bo'sh bo'lsa kartalar matn holida chiqadi.
@@ -84,7 +86,8 @@ class Settings(BaseSettings):
         return [int(x) for x in _split_csv(v)]  # type: ignore[arg-type]
 
     @field_validator(
-        "filial_shop_ids", "allowed_category_groups", mode="before"
+        "warehouse_shop_ids", "filial_shop_ids", "allowed_category_groups",
+        mode="before",
     )
     @classmethod
     def _parse_str_list(cls, v: object) -> list[str]:

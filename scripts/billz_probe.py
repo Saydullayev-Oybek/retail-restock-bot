@@ -30,7 +30,7 @@ TODAY = date.today()
 WEEK_AGO = TODAY - timedelta(days=7)
 
 
-def probes(shop_ids: str, warehouse_id: str) -> dict[str, tuple[str, dict]]:
+def probes(shop_ids: str, warehouse_ids: str) -> dict[str, tuple[str, dict]]:
     """nom -> (path, params). Hajm ataylab kichik: rate limit 2 rps."""
     return {
         "shops": ("/v1/shop", {"limit": 100, "only_allowed": "true"}),
@@ -43,7 +43,7 @@ def probes(shop_ids: str, warehouse_id: str) -> dict[str, tuple[str, dict]]:
         "products": ("/v2/products", {"limit": 3, "page": 1}),
         "transfers": ("/v1/transfer-report-table", {
             "start_date": WEEK_AGO.isoformat(), "end_date": TODAY.isoformat(),
-            "shop_ids": ",".join(filter(None, [shop_ids, warehouse_id])),
+            "shop_ids": ",".join(filter(None, [shop_ids, warehouse_ids])),
             "display_currency": "UZS", "page": 1, "limit": 5,
         }),
         "sales_daily": ("/v1/product-general-table", {
@@ -113,10 +113,11 @@ async def main() -> int:
                 print(f"  {shop.get('id')}  {shop.get('name')}")
 
         ids = [str(s.get("id")) for s in shops if isinstance(s, dict) and s.get("id")]
-        filials = [i for i in ids if i != settings.warehouse_shop_id]
+        warehouses = set(settings.warehouse_shop_ids)
+        filials = [i for i in ids if i not in warehouses]
         shop_ids = ",".join(filials[:10])
 
-        selected = probes(shop_ids, settings.warehouse_shop_id)
+        selected = probes(shop_ids, ",".join(warehouses))
         if args.only:
             selected = {k: v for k, v in selected.items() if k in set(args.only)}
 

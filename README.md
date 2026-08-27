@@ -187,9 +187,19 @@ Yana ikkita muhim nuqta:
 transfer va sotuv qatorlari `product_variant` jadvali orqali rangga
 bog'lanadi (`product_id` → `Цвет`).
 
-**Filiallar bir-biriga ham tovar yuboradi** (real ma'lumotda ~10%). Ular
-"yangi partiya keldi" hisoblanmaydi — shuning uchun `from_shop_id` majburiy
-tarzda SKLAD bilan solishtiriladi.
+**Filiallar bir-biriga ham tovar yuboradi** — real ma'lumotda 30 kunlik
+o'lchovda filiallarga kelgan transferlarning **~30%** i boshqa filialdan. Bu
+sotilmay qolgan tovarni qayta taqsimlash, ya'ni qayta buyurtmaga asos emas
+(aksincha — tovar boshqa joyda sotilmagan). Shuning uchun `from_shop_id`
+majburiy tarzda `WAREHOUSE_SHOP_IDS` ro'yxati bilan solishtiriladi.
+
+Manba taqsimoti (30 kun, filiallarga kelgan 20 522 qator):
+
+| Yuboruvchi | Ulush |
+|---|---|
+| `СКЛАД ПРИХОДА` (import) | 56.8% |
+| `BUTTON СКЛАД MEN` (sezon) | 12.9% |
+| filiallardan | ~30% |
 
 ### Katalog to'liq tortilmaydi
 
