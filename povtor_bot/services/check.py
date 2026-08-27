@@ -46,10 +46,6 @@ class CheckResult:
     usd_rate: float = 0.0
     transfer_rows: int = 0
     synced_skus: int = 0
-    # Menyuda kutayotgan bandlar soni. "total_found" har tekshiruvda tebranadi
-    # (yangi partiya kelishi, qaytarish, oynadan chiqish), menejer uchun esa
-    # muhimi — qancha ish qolgani.
-    open_count: int = 0
     error: str = ""
 
     @property
@@ -296,7 +292,6 @@ async def run_check(
         new_count=new_count,
         total_found=len(candidates),
         stock_rows=len(stock) if refresh_stock else await repo.stock_snapshot_rows(),
-        open_count=await repo.open_count(),
         usd_rate=usd_rate,
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,

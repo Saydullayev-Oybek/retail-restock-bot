@@ -40,7 +40,7 @@ Skript do'konlar ro'yxatini `id  nom` ko'rinishida chiqaradi.
 
 | Buyruq | Ish |
 |---|---|
-| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi. Hisobotda **"Hal qilinmagan"** asosiy raqam: "tekshirildi" har safar tebranadi (yangi partiya kelishi, qaytarish, oynadan chiqish), menejer uchun esa qancha ish qolgani muhim |
+| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi |
 | `/buyurtma` | Kaskadli menyu: kategoriya → ta'minotchi → artikul → karta |
 | `/yangi` | Yangi kelgan tovarlarni umumiy guruhga e'lon qiladi |
 | `/export` | Kunning javoblarini Excel'ga chiqaradi (har filialga alohida varaq) |
