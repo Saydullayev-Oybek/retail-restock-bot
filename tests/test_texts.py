@@ -6,14 +6,20 @@ belgilar uchrasa Telegram butun xabarni rad etadi va karta umuman ochilmaydi.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from povtor_bot.bot import texts
 from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_PENDING, STATUS_TAKEN
 
 
+TODAY = date(2026, 8, 27)
+
+
 def row(**overrides) -> dict:
     base = {
+        "detected_date": TODAY.isoformat(),
         "sku": "39666", "color": "Белый", "shop_name": "ANDALUS",
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
@@ -26,13 +32,13 @@ def row(**overrides) -> dict:
 
 class TestEscaping:
     def test_ampersand_and_tags_are_escaped(self) -> None:
-        text = texts.card_caption([row(supplier="A & B <script>")])
+        text = texts.card_caption([row(supplier="A & B <script>")], today=TODAY)
         assert "&amp;" in text and "&lt;script&gt;" in text
         assert "<script>" not in text
 
     def test_markdown_characters_pass_through_safely(self) -> None:
         """`_`, `-`, `*` HTML rejimida oddiy belgi — hech nima buzilmaydi."""
-        text = texts.card_caption([row(supplier="ABUSAXIY 8-22 M64")])
+        text = texts.card_caption([row(supplier="ABUSAXIY 8-22 M64")], today=TODAY)
         assert "ABUSAXIY 8-22 M64" in text
 
     def test_none_becomes_empty(self) -> None:
@@ -51,32 +57,32 @@ class TestMoney:
 
 class TestCardCaption:
     def test_shows_price_in_uzs(self) -> None:
-        assert "145 000 so'm" in texts.card_caption([row()])
+        assert "145 000 so'm" in texts.card_caption([row()], today=TODAY)
 
     def test_lists_every_shop_and_color(self) -> None:
         text = texts.card_caption([
             row(shop_name="ANDALUS", color="Белый"),
             row(shop_name="BERUNIY", color="Синий"),
-        ])
+        ], today=TODAY)
         assert "ANDALUS" in text and "BERUNIY" in text
         assert "Белый" in text and "Синий" in text
 
     def test_pending_item_has_no_answer_line(self) -> None:
-        assert "OLINDI" not in texts.card_caption([row()])
+        assert "OLINDI" not in texts.card_caption([row()], today=TODAY)
 
     def test_answered_item_shows_status(self) -> None:
-        text = texts.card_caption([row(status=STATUS_TAKEN)])
+        text = texts.card_caption([row(status=STATUS_TAKEN)], today=TODAY)
         assert "OLINDI" in text and "✅" in text
 
     def test_not_found_shows_transfer_hint(self) -> None:
         text = texts.card_caption([
             row(status=STATUS_NOT_FOUND, transfer_hint="Transfer qilsa bo'ladi — BERUNIY: 4 dona")
-        ])
+        ], today=TODAY)
         assert "BOZORDA YO'Q" in text and "BERUNIY: 4 dona" in text
 
     def test_percent_has_no_trailing_zero(self) -> None:
-        assert "(80%)" in texts.card_caption([row(percent=80.0)])
-        assert "(66.7%)" in texts.card_caption([row(percent=66.7)])
+        assert "(80%)" in texts.card_caption([row(percent=80.0)], today=TODAY)
+        assert "(66.7%)" in texts.card_caption([row(percent=66.7)], today=TODAY)
 
     def test_empty_rows(self) -> None:
         assert texts.card_caption([]) == "Band topilmadi."
@@ -134,3 +140,52 @@ class TestCheckReport:
     def test_no_new_candidates_explains_why(self) -> None:
         text = texts.check_report(self.Result(total_found=5, new_count=0))
         assert "Yangi nomzod yo'q" in text
+
+
+class TestAgeLabel:
+    """Bandning yoshi.
+
+    Javob berilmagan band menyuda TURAVERADI — ertaga ham, bir hafta keyin
+    ham. Menejer uning eskiligini ko'rib turishi kerak: eski band endi
+    dolzarb bo'lmasligi mumkin.
+    """
+
+    @pytest.mark.parametrize(
+        "detected, expected",
+        [
+            ("2026-08-27", ""),                # bugun — hech nima yozilmaydi
+            ("2026-08-26", "kecha"),
+            ("2026-08-25", "2 kun oldin"),
+            ("2026-08-22", "5 kun oldin"),
+        ],
+    )
+    def test_label(self, detected: str, expected: str) -> None:
+        assert texts.age_label(detected, TODAY) == expected
+
+    def test_stale_items_are_flagged(self) -> None:
+        """Oynadan chiqqan band ajratib ko'rsatiladi — u endi qayta aniqlanmaydi."""
+        assert texts.age_label("2026-08-22", TODAY, stale_after_days=5) == "5 kun oldin"
+        assert texts.age_label("2026-08-21", TODAY, stale_after_days=5) == "⚠️ 6 kun oldin"
+
+    def test_no_flag_without_threshold(self) -> None:
+        assert texts.age_label("2026-08-01", TODAY) == "26 kun oldin"
+
+    def test_future_or_broken_date(self) -> None:
+        assert texts.age_label("2026-09-01", TODAY) == ""
+        assert texts.age_label("", TODAY) == ""
+        assert texts.age_label("aniqmas", TODAY) == ""
+
+    def test_card_shows_age_only_for_old_items(self) -> None:
+        text = texts.card_caption([
+            row(shop_name="ANDALUS", detected_date="2026-08-27"),
+            row(shop_name="BERUNIY", detected_date="2026-08-24"),
+        ], today=TODAY)
+        andalus, beruniy = text.split("ANDALUS")[1], text.split("BERUNIY")[1]
+        assert "kun oldin" not in andalus.split("BERUNIY")[0]   # bugungi — toza
+        assert "3 kun oldin" in beruniy                          # eski — belgilangan
+
+    def test_card_flags_stale_item(self) -> None:
+        text = texts.card_caption(
+            [row(detected_date="2026-08-19")], today=TODAY, stale_after_days=5
+        )
+        assert "⚠️ 8 kun oldin" in text

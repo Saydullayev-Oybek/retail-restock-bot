@@ -8,6 +8,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 
+from ...config import Settings
 from ...core.models import STATUS_NOT_FOUND, STATUS_TAKEN
 from ...db import repo
 from ...services import cards, transfer_hint
@@ -128,7 +129,9 @@ async def on_back_to_skus(callback: CallbackQuery, callback_data: NavCB) -> None
 
 
 @router.callback_query(SkuCB.filter())
-async def on_sku(callback: CallbackQuery, callback_data: SkuCB, bot: Bot) -> None:
+async def on_sku(
+    callback: CallbackQuery, callback_data: SkuCB, bot: Bot, settings: Settings
+) -> None:
     sku = await repo.ref_value("sku", callback_data.ref)
     if sku is None:
         await callback.answer("Artikul topilmadi", show_alert=True)
@@ -145,7 +148,10 @@ async def on_sku(callback: CallbackQuery, callback_data: SkuCB, bot: Bot) -> Non
     message = callback.message
     if message is not None:
         await cards.delete_quietly(bot, message.chat.id, message.message_id)
-        await cards.send_card(bot, message.chat.id, rows, markup)
+        await cards.send_card(
+            bot, message.chat.id, rows, markup,
+            stale_after_days=settings.window_days,
+        )
     await callback.answer()
 
 
@@ -155,7 +161,9 @@ _ACTIONS = {"t": STATUS_TAKEN, "n": STATUS_NOT_FOUND}
 
 
 @router.callback_query(AnswerCB.filter())
-async def on_answer(callback: CallbackQuery, callback_data: AnswerCB, bot: Bot) -> None:
+async def on_answer(
+    callback: CallbackQuery, callback_data: AnswerCB, bot: Bot, settings: Settings
+) -> None:
     """OLINDI / BOZORDA YO'Q / bekor qilish.
 
     Faqat bosilgan bandning holati o'zgaradi — boshqa filiallar va ranglar
@@ -196,7 +204,10 @@ async def on_answer(callback: CallbackQuery, callback_data: AnswerCB, bot: Bot) 
     message = callback.message
     if message is not None and rows:
         markup = keyboards.card_kb(rows, callback_data.cat, callback_data.sup)
-        await cards.update_card(bot, message.chat.id, message.message_id, rows, markup)
+        await cards.update_card(
+            bot, message.chat.id, message.message_id, rows, markup,
+            stale_after_days=settings.window_days,
+        )
     await callback.answer(notice, show_alert=bool(callback_data.act == "n" and notice))
 
 
