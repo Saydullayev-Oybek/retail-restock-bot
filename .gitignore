@@ -1,9 +1,26 @@
+# Maxfiy sozlamalar — hech qachon commit qilinmasin
 .env
+
+# Python
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+.ruff_cache/
+
+# Ishchi ma'lumotlar: baza, Billz API dump'lari, export fayllari.
+# Bularda mijoz va savdo ma'lumoti bo'ladi.
+var/
+*.db
+*.db-wal
+*.db-shm
+
+# Haqiqiy POVTOR fayllarida mijoz ma'lumoti bor;
+# testlar uchun faqat anonimlashtirilgan namuna saqlanadi
 *.xlsx
 !tests/fixtures/*.xlsx
+
+# OS / IDE
 .DS_Store
 .idea/
 .vscode/

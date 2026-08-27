@@ -1,0 +1,259 @@
+"""db/repo.py — idempotentlik va poyga holatlari.
+
+Nega aynan shu ikkisi: bot kuniga bir necha marta /tekshir ni ishlatadi
+(qo'lda + cron), va bir kartani ikki menejer ko'rib turishi mumkin.
+Ikkalasi ham "jim buziladigan" xatolar sinfiga kiradi.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import timedelta
+
+import pytest
+
+from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_PENDING, STATUS_TAKEN
+from povtor_bot.db import repo
+
+from .conftest import TODAY, make_candidate
+
+pytestmark = pytest.mark.usefixtures("database")
+
+
+class TestInsertCandidates:
+    async def test_inserts_new(self) -> None:
+        assert await repo.insert_candidates([make_candidate()]) == 1
+        assert await repo.open_count(TODAY) == 1
+
+    async def test_second_run_same_day_adds_nothing(self) -> None:
+        """/tekshir ni qayta ishlatish dublikat yaratmasligi kerak."""
+        candidate = make_candidate()
+        assert await repo.insert_candidates([candidate]) == 1
+        assert await repo.insert_candidates([candidate]) == 0
+        assert await repo.open_count(TODAY) == 1
+
+    async def test_rerun_does_not_erase_answer(self) -> None:
+        """Eng muhim: javob berilgan band qayta tekshiruvda 'pending' ga qaytmaydi."""
+        await repo.insert_candidates([make_candidate()])
+        rows = await repo.card_items("39666", TODAY)
+        assert await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
+
+        await repo.insert_candidates([make_candidate()])
+        rows = await repo.card_items("39666", TODAY)
+        assert rows[0]["status"] == STATUS_TAKEN
+
+    async def test_same_sku_different_color_and_shop_are_separate(self) -> None:
+        await repo.insert_candidates([
+            make_candidate(color="Белый"),
+            make_candidate(color="Синий"),
+            make_candidate(shop_id="shop2", shop_name="BERUNIY"),
+        ])
+        assert await repo.open_count(TODAY) == 3
+
+    async def test_next_day_is_a_new_row(self) -> None:
+        await repo.insert_candidates([make_candidate()])
+        await repo.insert_candidates([make_candidate(detected_date=TODAY + timedelta(days=1))])
+        assert await repo.open_count(TODAY) == 1
+        assert await repo.open_count(TODAY + timedelta(days=1)) == 1
+
+    async def test_empty_list(self) -> None:
+        assert await repo.insert_candidates([]) == 0
+
+
+class TestAnswer:
+    async def _one_id(self) -> int:
+        await repo.insert_candidates([make_candidate()])
+        rows = await repo.card_items("39666", TODAY)
+        return rows[0]["id"]
+
+    async def test_taken_writes_status_and_user(self) -> None:
+        cid = await self._one_id()
+        assert await repo.answer_candidate(cid, status=STATUS_TAKEN, user_id=777)
+        row = await repo.get_candidate(cid)
+        assert row["status"] == STATUS_TAKEN
+        assert row["answered_by"] == 777
+        assert row["answered_at"] is not None
+
+    async def test_not_found_stores_transfer_hint(self) -> None:
+        cid = await self._one_id()
+        await repo.answer_candidate(
+            cid, status=STATUS_NOT_FOUND, user_id=1, transfer_hint="BERUNIY: 4 dona"
+        )
+        row = await repo.get_candidate(cid)
+        assert row["status"] == STATUS_NOT_FOUND
+        assert row["transfer_hint"] == "BERUNIY: 4 dona"
+
+    async def test_second_answer_is_rejected(self) -> None:
+        """Ikkinchi bosish False qaytaradi — birinchi javob kuchda qoladi."""
+        cid = await self._one_id()
+        assert await repo.answer_candidate(cid, status=STATUS_TAKEN, user_id=1)
+        assert not await repo.answer_candidate(cid, status=STATUS_NOT_FOUND, user_id=2)
+        row = await repo.get_candidate(cid)
+        assert row["status"] == STATUS_TAKEN
+        assert row["answered_by"] == 1
+
+    async def test_concurrent_answers_write_exactly_one(self) -> None:
+        """Ikki menejer bir vaqtda bossa — aynan bittasi yozadi."""
+        cid = await self._one_id()
+        results = await asyncio.gather(*[
+            repo.answer_candidate(cid, status=STATUS_TAKEN, user_id=uid)
+            for uid in range(1, 6)
+        ])
+        assert sum(results) == 1
+
+    async def test_answer_writes_audit_event(self) -> None:
+        cid = await self._one_id()
+        await repo.answer_candidate(cid, status=STATUS_TAKEN, user_id=42)
+        from povtor_bot.db.conn import db
+        async with db().execute(
+            "SELECT action, user_id FROM item_event WHERE candidate_id = ?", (cid,)
+        ) as cursor:
+            events = list(await cursor.fetchall())
+        assert [(e["action"], e["user_id"]) for e in events] == [(STATUS_TAKEN, 42)]
+
+    async def test_reset_returns_to_pending(self) -> None:
+        cid = await self._one_id()
+        await repo.answer_candidate(cid, status=STATUS_TAKEN, user_id=1)
+        assert await repo.reset_candidate(cid, user_id=1)
+        row = await repo.get_candidate(cid)
+        assert row["status"] == STATUS_PENDING
+        assert row["answered_by"] is None
+
+    async def test_reset_of_pending_does_nothing(self) -> None:
+        cid = await self._one_id()
+        assert not await repo.reset_candidate(cid, user_id=1)
+
+    async def test_unknown_status_raises(self) -> None:
+        cid = await self._one_id()
+        with pytest.raises(ValueError):
+            await repo.answer_candidate(cid, status="nima_bu", user_id=1)
+
+
+class TestCascadeMenu:
+    async def _seed(self) -> None:
+        await repo.insert_candidates([
+            make_candidate(category_group="Obuv", supplier="Bektosh M291", sku="40722"),
+            make_candidate(category_group="Obuv", supplier="Bektosh M291", sku="40722",
+                           color="Синий"),
+            make_candidate(category_group="Obuv", supplier="Sherzod New M401", sku="40688"),
+            make_candidate(category_group="Poyasnaya", supplier="Sharof M255", sku="39666"),
+        ])
+
+    async def test_categories_carry_open_counts(self) -> None:
+        await self._seed()
+        rows = await repo.categories_with_open_counts(TODAY)
+        assert {r["category_group"]: r["open_count"] for r in rows} == {
+            "Obuv": 3, "Poyasnaya": 1,
+        }
+
+    async def test_answered_items_drop_out_of_counts(self) -> None:
+        await self._seed()
+        items = await repo.card_items("40722", TODAY)
+        await repo.answer_candidate(items[0]["id"], status=STATUS_TAKEN, user_id=1)
+        rows = await repo.categories_with_open_counts(TODAY)
+        assert {r["category_group"]: r["open_count"] for r in rows}["Obuv"] == 2
+
+    async def test_suppliers_scoped_to_category(self) -> None:
+        await self._seed()
+        rows = await repo.suppliers_with_open_counts("Obuv", TODAY)
+        assert {r["supplier"] for r in rows} == {"Bektosh M291", "Sherzod New M401"}
+
+    async def test_skus_scoped_to_supplier(self) -> None:
+        await self._seed()
+        rows = await repo.skus_with_open_counts("Obuv", "Bektosh M291", TODAY)
+        assert [r["sku"] for r in rows] == ["40722"]
+        assert rows[0]["open_count"] == 2
+        assert rows[0]["total_qty"] == 20      # 2 x ishonchli(10)
+
+    async def test_card_shows_answered_items_too(self) -> None:
+        """Karta hal qilinganlarni ham ko'rsatadi — menejer nima qilganini ko'rsin."""
+        await self._seed()
+        items = await repo.card_items("40722", TODAY)
+        await repo.answer_candidate(items[0]["id"], status=STATUS_TAKEN, user_id=1)
+        assert len(await repo.card_items("40722", TODAY)) == 2
+
+
+class TestStockSnapshot:
+    async def test_replace_and_lookup(self) -> None:
+        await repo.replace_stock_snapshot([
+            ("shop1", "ANDALUS", "39666", "Белый", 0),
+            ("shop2", "BERUNIY", "39666", "Белый", 4),
+            ("shop3", "MAGNIT", "39666", "Белый", 9),
+        ], TODAY)
+        rows = await repo.other_shops_with_stock("39666", "Белый", exclude_shop_id="shop1")
+        assert [(r["shop_name"], r["quantity"]) for r in rows] == [
+            ("MAGNIT", 9), ("BERUNIY", 4),
+        ]
+
+    async def test_snapshot_replaces_previous(self) -> None:
+        """Qoldiq nolga tushsa eski qator qolib ketmasligi kerak."""
+        await repo.replace_stock_snapshot([("shop2", "BERUNIY", "1", "", 5)], TODAY)
+        await repo.replace_stock_snapshot([], TODAY)
+        assert await repo.other_shops_with_stock("1", "", "shop1") == []
+
+    async def test_limit_is_respected(self) -> None:
+        await repo.replace_stock_snapshot([
+            (f"shop{i}", f"F{i}", "1", "", i) for i in range(1, 8)
+        ], TODAY)
+        assert len(await repo.other_shops_with_stock("1", "", "shopX", limit=3)) == 3
+
+
+class TestProductCache:
+    async def test_file_id_survives_billz_resync(self) -> None:
+        """Telegram file_id Billz sinxronizatsiyasida o'chib ketmasligi shart."""
+        await repo.cache_products([{"sku": "1", "color": "Белый", "image_url": "u1"}])
+        await repo.set_file_id("1", "Белый", "AgACAgIAAx...")
+        await repo.cache_products([{"sku": "1", "color": "Белый", "image_url": "u2"}])
+        row = await repo.get_cached_product("1", "Белый")
+        assert row["tg_file_id"] == "AgACAgIAAx..."
+        assert row["image_url"] == "u2"
+
+    async def test_empty_image_url_does_not_erase_existing(self) -> None:
+        await repo.cache_products([{"sku": "1", "color": "", "image_url": "u1"}])
+        await repo.cache_products([{"sku": "1", "color": "", "image_url": ""}])
+        row = await repo.get_cached_product("1", "")
+        assert row["image_url"] == "u1"
+
+    async def test_image_missing_flag(self) -> None:
+        await repo.mark_image_missing("2", "Синий")
+        row = await repo.get_cached_product("2", "Синий")
+        assert row["image_missing"] == 1
+        # file_id kelsa flag tushadi
+        await repo.set_file_id("2", "Синий", "fid")
+        row = await repo.get_cached_product("2", "Синий")
+        assert row["image_missing"] == 0
+
+
+class TestRef:
+    async def test_stable_id_for_same_value(self) -> None:
+        first = await repo.ref_id("sup", "ABUSAXIY 8-22 M64")
+        second = await repo.ref_id("sup", "ABUSAXIY 8-22 M64")
+        assert first == second
+        assert await repo.ref_value("sup", first) == "ABUSAXIY 8-22 M64"
+
+    async def test_kinds_do_not_collide(self) -> None:
+        cat = await repo.ref_id("cat", "Obuv")
+        assert await repo.ref_value("sup", cat) is None
+
+    async def test_unknown_ref(self) -> None:
+        assert await repo.ref_value("cat", 99999) is None
+
+
+class TestAnnounce:
+    async def test_filters_already_announced(self) -> None:
+        rows = [("2026-08-20", "shop1", "1", "Белый"), ("2026-08-20", "shop1", "2", "")]
+        assert await repo.filter_unannounced(rows) == rows
+        await repo.mark_announced(rows[:1])
+        assert await repo.filter_unannounced(rows) == rows[1:]
+
+
+class TestExport:
+    async def test_only_answered_rows(self) -> None:
+        await repo.insert_candidates([
+            make_candidate(sku="1"), make_candidate(sku="2"), make_candidate(sku="3"),
+        ])
+        for sku, status in (("1", STATUS_TAKEN), ("2", STATUS_NOT_FOUND)):
+            rows = await repo.card_items(sku, TODAY)
+            await repo.answer_candidate(rows[0]["id"], status=status, user_id=1)
+        exported = await repo.answered_for_export(TODAY)
+        assert {r["sku"] for r in exported} == {"1", "2"}
