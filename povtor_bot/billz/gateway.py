@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..core.models import ProductInfo, SalesRow, Shop, StockRow, TransferRow
@@ -247,6 +247,49 @@ class BillzGateway:
         log.debug("%s: %d qator", path, len(collected))
         return collected
 
+    async def _paginate_by_day(
+        self, path: str, params: dict[str, Any], *keys: str,
+        start: date, end: date, dedupe_by: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Davrni KUNLARGA bo'lib so'raydi.
+
+        Nega: Billz hisobotlari yangisidan eskisiga tartiblangan va tirik —
+        do'kon ishlayotgan paytda har yangi yozuv ro'yxat BOSHIGA qo'shilib,
+        qolganini bir pozitsiya suradi. Natijada `page=2` ni ikki marta
+        so'raganda chegara siljiydi: ba'zi qatorlar ikki marta tushadi,
+        ba'zilari umuman tushmaydi.
+
+        O'lchov (bir xil so'rov, ketma-ket): page=2 uchun -4/+4, keyin -7/+7.
+        Shu sababli nomzodlar soni har tekshiruvda 92..96 orasida sakrardi.
+
+        O'tgan kunlar esa O'ZGARMAYDI — 23-avgustga endi yangi transfer
+        qo'shilmaydi. Faqat bugungi kun tirik, va u bitta sahifaga sig'adi.
+
+        `dedupe_by` — qolgan takrorlanishlarga qarshi zaxira.
+        """
+        collected: list[dict[str, Any]] = []
+        day = start
+        while day <= end:
+            iso = day.isoformat()
+            collected.extend(await self._paginate(
+                path, {**params, "start_date": iso, "end_date": iso}, *keys
+            ))
+            day += timedelta(days=1)
+
+        if not dedupe_by:
+            return collected
+        seen: set[tuple[Any, ...]] = set()
+        unique: list[dict[str, Any]] = []
+        for row in collected:
+            key = tuple(row.get(f) for f in dedupe_by)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        if len(unique) != len(collected):
+            log.debug("%s: %d takror qator tashlandi", path, len(collected) - len(unique))
+        return unique
+
     # ───────────────────────── metodlar ─────────────────────────
 
     async def shops(self) -> list[Shop]:
@@ -316,12 +359,15 @@ class BillzGateway:
     ) -> list[TransferRow]:
         """GET /v1/transfer-report-table — SKLAD -> filial harakatlari."""
         params = {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
             "shop_ids": ",".join(shop_ids),
             "display_currency": "UZS",
         }
-        rows = await self._paginate("/v1/transfer-report-table", params, "rows")
+        rows = await self._paginate_by_day(
+            "/v1/transfer-report-table", params, "rows",
+            start=start, end=end,
+            # bir transfer ichida bir tovar bir marta uchraydi
+            dedupe_by=("transfer_id", "product_id"),
+        )
         result: list[TransferRow] = []
         for row in rows:
             arrived = parse_date(_pick(row, "accepted_at", "created_at"))
@@ -362,15 +408,19 @@ class BillzGateway:
         yakuniy summa emas, kunlar kesimi kerak.
         """
         params = {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
             "shop_ids": ",".join(shop_ids),
             "currency": "UZS",
             "detalization": "day",
         }
         # Javobdagi ro'yxat kaliti — `products_stats_by_date` (hujjatda ko'rsatilmagan)
-        rows = await self._paginate(
-            "/v1/product-general-table", params, "products_stats_by_date", "rows", "products"
+        # DEDUPE YO'Q: sotuv hisoboti bir (kun, filial, tovar) uchun bir NECHTA
+        # qator qaytaradi — har xil narx/chegirma bo'yicha, va ularning har biri
+        # alohida haqiqiy sotuv. (date, shop_id, product_id) bo'yicha birlashtirish
+        # o'lchovda sotuvning 16% ini yo'q qilgan edi.
+        rows = await self._paginate_by_day(
+            "/v1/product-general-table", params,
+            "products_stats_by_date", "rows", "products",
+            start=start, end=end,
         )
         result: list[SalesRow] = []
         for row in rows:

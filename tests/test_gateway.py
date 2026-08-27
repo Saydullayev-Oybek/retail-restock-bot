@@ -362,3 +362,113 @@ class TestPagination:
         gateway, client = self._gateway([[{"i": 0}], []])
         await gateway._paginate("/x", {"shop_ids": "a,b", "currency": "UZS"}, "rows", limit=1)
         assert all(p["shop_ids"] == "a,b" and p["currency"] == "UZS" for p in client.requested)
+
+
+class TestDailyPagination:
+    """Hisobotlar KUN-KUN so'raladi.
+
+    Billz hisobotlari yangisidan eskisiga tartiblangan va tirik: do'kon
+    ishlayotgan paytda har yangi yozuv ro'yxat boshiga qo'shilib, sahifa
+    chegaralarini suradi. Bir xil so'rov turli javob qaytaradi (o'lchovda
+    page=2 uchun -4/+4, keyin -7/+7), va nomzodlar soni sakraydi.
+
+    O'tgan kunlar o'zgarmaydi, shuning uchun har kun alohida so'raladi.
+    """
+
+    class DayClient:
+        """Har kun uchun alohida javob beradigan soxta klient."""
+
+        def __init__(self, by_day: dict[str, list[dict]]) -> None:
+            self.by_day = by_day
+            self.requested: list[dict] = []
+
+        async def get(self, path: str, params: dict) -> dict:
+            self.requested.append(dict(params))
+            day = params["start_date"]
+            rows = self.by_day.get(day, [])
+            # sahifalash: bitta sahifaga sig'adi deb hisoblaymiz
+            return {"rows": rows if params["page"] == 1 else []}
+
+    def _gw(self, by_day):
+        client = self.DayClient(by_day)
+        return gw.BillzGateway(client, page_limit=1000, concurrency=1), client  # type: ignore[arg-type]
+
+    async def test_each_day_is_requested_separately(self) -> None:
+        gateway, client = self._gw({
+            "2026-08-25": [{"transfer_id": "a", "product_id": "1"}],
+            "2026-08-26": [{"transfer_id": "b", "product_id": "1"}],
+            "2026-08-27": [{"transfer_id": "c", "product_id": "1"}],
+        })
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 25), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 3
+        kunlar = [p["start_date"] for p in client.requested if p["page"] == 1]
+        assert kunlar == ["2026-08-25", "2026-08-26", "2026-08-27"]
+        # har so'rovda start_date == end_date
+        assert all(p["start_date"] == p["end_date"] for p in client.requested)
+
+    async def test_duplicates_across_days_are_dropped(self) -> None:
+        """Kun chegarasida bir qator ikki marta chiqishi mumkin — zaxira himoya."""
+        row = {"transfer_id": "a", "product_id": "1"}
+        gateway, _ = self._gw({"2026-08-26": [row], "2026-08-27": [dict(row)]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 26), end=date(2026, 8, 27),
+            dedupe_by=("transfer_id", "product_id"),
+        )
+        assert len(rows) == 1
+
+    async def test_without_dedupe_everything_is_kept(self) -> None:
+        row = {"transfer_id": "a", "product_id": "1"}
+        gateway, _ = self._gw({"2026-08-26": [row], "2026-08-27": [dict(row)]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 26), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 2
+
+    async def test_single_day_range(self) -> None:
+        gateway, client = self._gw({"2026-08-27": [{"transfer_id": "a", "product_id": "1"}]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 27), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 1
+        assert {p["start_date"] for p in client.requested} == {"2026-08-27"}
+
+    async def test_empty_days_are_skipped_silently(self) -> None:
+        gateway, _ = self._gw({"2026-08-27": [{"transfer_id": "a", "product_id": "1"}]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 24), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 1
+
+
+class TestSalesAreNotDeduped:
+    """Sotuv hisoboti DEDUPE QILINMASLIGI kerak.
+
+    Billz bir (kun, filial, tovar) uchun bir NECHTA qator qaytaradi — har xil
+    narx/chegirma bo'yicha, va ularning har biri alohida haqiqiy sotuv.
+    Real o'lchov: bitta artikulda 11 ta qator (1472, 1384, 3000, 2872 so'm).
+    (date, shop_id, product_id) bo'yicha birlashtirish sotuvning 16% ini
+    yo'q qilgan edi.
+    """
+
+    class Client:
+        def __init__(self, rows): self.rows = rows
+        async def get(self, path, params):
+            return {"products_stats_by_date": self.rows if params["page"] == 1 else []}
+
+    async def test_same_product_multiple_price_rows_are_all_kept(self) -> None:
+        rows = [
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 1},
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 2},
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 2},
+        ]
+        gateway = gw.BillzGateway(self.Client(rows), page_limit=1000, concurrency=1)  # type: ignore[arg-type]
+        sales = await gateway.sales(
+            start=date(2026, 8, 24), end=date(2026, 8, 24), shop_ids=["s1"]
+        )
+        assert len(sales) == 3
+        assert sum(s.quantity for s in sales) == 5   # 1 + 2 + 2, birlashtirilmagan

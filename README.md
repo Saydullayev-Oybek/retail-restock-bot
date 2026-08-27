@@ -220,6 +220,35 @@ Manba taqsimoti (30 kun, filiallarga kelgan 20 522 qator):
 | `BUTTON СКЛАД MEN` (sezon) | 12.9% |
 | filiallardan | ~30% |
 
+### Hisobotlar KUN-KUN so'raladi
+
+Billz hisobotlari **yangisidan eskisiga** tartiblangan va **tirik**: do'kon
+ishlayotgan paytda har yangi yozuv ro'yxat boshiga qo'shilib, sahifa
+chegaralarini suradi. Bir xil so'rov turli javob qaytaradi.
+
+O'lchov (`page=2` ni ketma-ket 3 marta):
+
+```
+1-so'rov: 1000 qator
+2-so'rov: -4 / +4     <- boshqa qatorlar
+3-so'rov: -7 / +7
+```
+
+Natijada ba'zi qatorlar ikki marta tushardi, ba'zilari **umuman tushmasdi** —
+nomzodlar soni har tekshiruvda 92..96 orasida sakrardi.
+
+O'tgan kunlar esa o'zgarmaydi, shuning uchun har kun **alohida** so'raladi.
+Faqat bugungi kun tirik, va u bitta sahifaga sig'adi.
+
+Natija (uch marta ketma-ket): `99, 99, 99` — farq `-0/+0`.
+
+⚠️ **Sotuv hisoboti DEDUPE QILINMAYDI.** Billz bir (kun, filial, tovar) uchun
+bir nechta qator qaytaradi — har xil narx/chegirma bo'yicha, va ularning har
+biri alohida haqiqiy sotuv (bir artikulda 11 tagacha qator kuzatilgan).
+`(date, shop_id, product_id)` bo'yicha birlashtirish sotuvning **16%** ini
+yo'q qiladi. Transfer uchun esa `(transfer_id, product_id)` xavfsiz —
+tekshirilgan, takror yo'q.
+
 ### Tezlik
 
 Billz hisobot dvigateli bitta sahifani ~3 sekund hisoblaydi, va bu vaqt
