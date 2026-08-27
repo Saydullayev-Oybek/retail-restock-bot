@@ -28,7 +28,11 @@ COLOR_FIELD_NAMES = ("цвет", "color", "rang", "tus")
 SUBCATEGORY_FIELD_NAMES = ("подкатегория", "subcategory", "podkategoriya")
 KIND_FIELD_NAMES = ("вид", "kind", "tur")
 
-_PAGE_LIMIT = 500
+# Billz hisobot dvigateli vaqtni QATOR soniga emas, HAR SO'ROVGA sarflaydi:
+# o'lchovda 500 qator 4.2s, 2000 qator 3.3s keldi. Shuning uchun sahifa
+# kattaroq bo'lgani yaxshi — so'rovlar soni kamayadi, vaqt esa o'zgarmaydi.
+# 1000 — hujjatda ko'rsatilgan maksimum (product-general-table uchun).
+_PAGE_LIMIT = 1000
 _MAX_PAGES = 200   # cheksiz sikldan himoya
 
 
@@ -177,13 +181,14 @@ def _count_of(payload: dict[str, Any]) -> int:
 class BillzGateway:
     """Yuqori darajali chaqiruvlar — hammasi domen modellarini qaytaradi."""
 
-    def __init__(self, client: BillzClient) -> None:
+    def __init__(self, client: BillzClient, page_limit: int = _PAGE_LIMIT) -> None:
         self._client = client
+        self._page_limit = max(1, page_limit)
 
     # ───────────────────────── sahifalash ─────────────────────────
 
     async def _paginate(
-        self, path: str, params: dict[str, Any], *keys: str, limit: int = _PAGE_LIMIT
+        self, path: str, params: dict[str, Any], *keys: str, limit: int | None = None
     ) -> list[dict[str, Any]]:
         """Barcha sahifalarni yig'adi. To'xtash sharti — BO'SH sahifa.
 
@@ -198,6 +203,7 @@ class BillzGateway:
 
         Narxi: har hisobot uchun bitta qo'shimcha (bo'sh) so'rov.
         """
+        limit = limit or self._page_limit
         collected: list[dict[str, Any]] = []
         seen_pages = 0
         for page in range(1, _MAX_PAGES + 1):

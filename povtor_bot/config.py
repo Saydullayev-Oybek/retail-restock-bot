@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     billz_base_url: str = "https://api-admin.billz.ai"
     billz_platform_id: str = "7d4a4c38-dd84-4902-b744-0488b80a4c01"
     billz_rate_limit_rps: float = 1.5
+    # Hisobot sahifasidagi qatorlar soni. Billz vaqtni QATOR soniga emas, har
+    # SO'ROVGA sarflaydi (o'lchov: 500 qator 4.2s, 2000 qator 3.3s), shuning
+    # uchun katta sahifa tekshiruvni sezilarli tezlashtiradi.
+    # 1000 — hujjatdagi maksimum. 2000 ham sinovda toza ishladi.
+    billz_page_limit: int = 1000
 
     # Sklad bitta emas: tarmoqda import skladi va sezoni o'tgan tovar skladi bor.
     # Qaysilari "yangi partiya" manbai hisoblanishi shu ro'yxat bilan belgilanadi.

@@ -251,9 +251,21 @@ class TestPagination:
             rows = self.pages[index] if index < len(self.pages) else []
             return {"rows": rows, "count": len(rows)}
 
-    def _gateway(self, pages: list[list[dict]]):
+    def _gateway(self, pages: list[list[dict]], page_limit: int = 500):
         client = self.StubClient(pages)
-        return gw.BillzGateway(client), client  # type: ignore[arg-type]
+        return gw.BillzGateway(client, page_limit=page_limit), client  # type: ignore[arg-type]
+
+    async def test_configured_page_limit_is_used(self) -> None:
+        """Sahifa hajmi .env dan keladi — Billz vaqtni har so'rovga sarflaydi,
+        shuning uchun kattaroq sahifa tekshiruvni tezlashtiradi."""
+        gateway, client = self._gateway([[{"i": 1}], []], page_limit=2000)
+        await gateway._paginate("/x", {}, "rows")
+        assert all(p["limit"] == 2000 for p in client.requested)
+
+    async def test_explicit_limit_overrides_config(self) -> None:
+        gateway, client = self._gateway([[{"i": 1}], []], page_limit=2000)
+        await gateway._paginate("/x", {}, "rows", limit=50)
+        assert all(p["limit"] == 50 for p in client.requested)
 
     async def test_collects_every_page(self) -> None:
         pages = [[{"i": i} for i in range(3)], [{"i": 3}, {"i": 4}, {"i": 5}], [{"i": 6}]]
