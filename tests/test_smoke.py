@@ -77,3 +77,67 @@ class TestSchema:
             mode = (await cursor.fetchone())[0]
         await conn.close()
         assert mode.lower() == "wal"
+
+
+class TestRawLogPolicy:
+    """Xom javob saqlash siyosati.
+
+    Har bir muvaffaqiyatli javobni saqlash bazani shishiradi — bir kunlik
+    sinovda billz_raw 168 MB bo'lgan (butun bazaning 93% i), va hammasi
+    HTTP 200 edi. Muammo chiqqanda kerak bo'ladigani — xato javob.
+    """
+
+    async def _sink_for(self, **overrides):
+        from povtor_bot.config import Settings
+        from povtor_bot.main import build_billz
+
+        base = dict(bot_token="T", billz_secret_token="s")
+        base.update(overrides)
+        client, _ = build_billz(Settings(_env_file=None, **base))  # type: ignore[arg-type]
+        sink = client._raw_sink
+        await client.aclose()
+        return sink
+
+    async def test_errors_are_saved(self, tmp_path) -> None:
+        from povtor_bot.db import conn
+        from povtor_bot.db.conn import db
+
+        await conn.close()
+        await conn.connect(str(tmp_path / "raw.db"))
+        try:
+            sink = await self._sink_for()
+            await sink("/v1/shop", {}, 500, "internal boom")
+            async with db().execute("SELECT status, body FROM billz_raw") as cur:
+                rows = list(await cur.fetchall())
+            assert [(r["status"], r["body"]) for r in rows] == [(500, "internal boom")]
+        finally:
+            await conn.close()
+
+    async def test_successful_responses_are_not_saved(self, tmp_path) -> None:
+        from povtor_bot.db import conn
+        from povtor_bot.db.conn import db
+
+        await conn.close()
+        await conn.connect(str(tmp_path / "raw2.db"))
+        try:
+            sink = await self._sink_for()
+            for _ in range(5):
+                await sink("/v1/shop", {}, 200, "x" * 100_000)
+            async with db().execute("SELECT COUNT(*) AS n FROM billz_raw") as cur:
+                assert (await cur.fetchone())["n"] == 0
+        finally:
+            await conn.close()
+
+    async def test_debug_mode_saves_everything(self, tmp_path) -> None:
+        from povtor_bot.db import conn
+        from povtor_bot.db.conn import db
+
+        await conn.close()
+        await conn.connect(str(tmp_path / "raw3.db"))
+        try:
+            sink = await self._sink_for(billz_raw_log_all=True)
+            await sink("/v1/shop", {}, 200, "ok")
+            async with db().execute("SELECT COUNT(*) AS n FROM billz_raw") as cur:
+                assert (await cur.fetchone())["n"] == 1
+        finally:
+            await conn.close()

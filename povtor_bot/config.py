@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     schedule_time: str = "09:00"
     announce_lookback_days: int = 2
     raw_retention_days: int = 7
+    # Sukut bo'yicha faqat XATO javoblar saqlanadi. Muvaffaqiyatli javoblar
+    # juda katta (bitta hisobot sahifasi ~100 KB) va foydasi yo'q — muammo
+    # chiqqanda kerak bo'ladigani xato javob. Billz javob shakli o'zgarganda
+    # tekshirish uchun vaqtincha true qilib qo'yish mumkin.
+    billz_raw_log_all: bool = False
     log_level: str = "INFO"
 
     # pydantic ro'yxatni JSON deb o'qishga urinadi; bizda oddiy CSV — o'zimiz bo'lamiz

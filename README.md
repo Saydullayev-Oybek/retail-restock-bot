@@ -278,8 +278,18 @@ python scripts/billz_probe.py --out var/probe
 ```
 
 Har bir endpoint'dan bitta kichik sahifa olinadi va JSON qilib saqlanadi.
-Bundan tashqari bot ishlaganda barcha xom javoblar `billz_raw` jadvaliga
+Bundan tashqari bot ishlaganda **xato** javoblar `billz_raw` jadvaliga
 yoziladi (`RAW_RETENTION_DAYS` kundan keyin tozalanadi).
+
+⚠️ Muvaffaqiyatli javoblar ATAYLAB saqlanmaydi: bitta hisobot sahifasi
+~100 KB, va bir kunlik sinovda `billz_raw` 168 MB bo'lgan — butun bazaning
+93% i, hammasi `HTTP 200`. Muammo chiqqanda kerak bo'ladigani xato javob.
+
+Billz javob shakli o'zgarganini tekshirish kerak bo'lsa, vaqtincha:
+
+```
+BILLZ_RAW_LOG_ALL=true
+```
 
 ## Testlar
 
@@ -319,7 +329,7 @@ SQLite, `var/povtor.db` (WAL rejimi). Asosiy jadvallar:
 | `card_msg` | Kartaning oxirgi turi (rasmli/matnli) |
 | `announced_arrival` | E'lon idempotentligi |
 | `ref` | Uzun nomlar → qisqa int ID (callback_data 64 bayt chegarasi) |
-| `billz_raw` | Xom API javoblari (debug) |
+| `billz_raw` | **Faqat XATO** API javoblari (`HTTP >= 400`) |
 | `kv` | Token, refresh_token, muddat |
 
 Sxema `povtor_bot/db/schema.sql` da, `CREATE TABLE IF NOT EXISTS` bilan —

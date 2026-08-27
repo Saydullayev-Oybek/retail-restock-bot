@@ -40,6 +40,16 @@ def setup_logging(level: str) -> None:
 
 
 def build_billz(settings: Settings) -> tuple[BillzClient, BillzGateway]:
+    async def raw_sink(path: str, params: dict, status: int, body: str) -> None:
+        """Xom javobni saqlash siyosati.
+
+        Har bir muvaffaqiyatli javobni saqlash bazani shishiradi (bir kunlik
+        sinovda 168 MB) va hech narsa bermaydi. Muammo chiqqanda kerak
+        bo'ladigani — XATO javob.
+        """
+        if settings.billz_raw_log_all or status >= 400:
+            await repo.save_raw(path, params, status, body)
+
     client = BillzClient(
         secret_token=settings.billz_secret_token,
         base_url=settings.billz_base_url,
@@ -47,7 +57,7 @@ def build_billz(settings: Settings) -> tuple[BillzClient, BillzGateway]:
         rate_limit_rps=settings.billz_rate_limit_rps,
         kv_get=repo.kv_get,
         kv_set=repo.kv_set,
-        raw_sink=repo.save_raw,
+        raw_sink=raw_sink,
     )
     return client, BillzGateway(
         client,
