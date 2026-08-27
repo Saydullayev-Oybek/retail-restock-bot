@@ -18,6 +18,7 @@ from .bot.middlewares import AuthMiddleware
 from .config import Settings, get_settings
 from .db import conn, repo
 from .scheduler import build_scheduler
+from .singleton import AlreadyRunning, acquire
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,10 @@ async def run() -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
 
+    # Ikkinchi nusxa hech qachon foydali emas — faqat ziyon (Telegram 409,
+    # N barobar cron, N barobar Billz yuki). Kelib chiqishida to'xtatamiz.
+    acquire(settings.lock_path)
+
     if not settings.allowed_user_ids:
         log.warning("ALLOWED_USER_IDS bo'sh — botdan hech kim foydalana olmaydi")
 
@@ -114,6 +119,10 @@ async def run() -> None:
 def main() -> None:
     try:
         asyncio.run(run())
+    except AlreadyRunning as exc:
+        # Log sozlanmagan bo'lishi mumkin — to'g'ridan-to'g'ri chiqaramiz
+        print(f"\n⛔ {exc}\n", file=sys.stderr)
+        raise SystemExit(1) from None
     except (KeyboardInterrupt, SystemExit):
         log.info("Foydalanuvchi to'xtatdi")
 

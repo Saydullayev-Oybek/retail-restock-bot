@@ -40,8 +40,19 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("tekshir"))
 async def cmd_check(message: Message, gateway: BillzGateway, settings: Settings) -> None:
     """Billz'dan tortadi, hisoblaydi, yangi nomzodlarni yozadi."""
+    if check_service.is_running():
+        await message.answer(
+            "⏳ Tekshiruv allaqachon ketyapti — tugashini kuting.\n"
+            "<i>Odatda 1-2 daqiqa oladi.</i>"
+        )
+        return
+
     notice = await message.answer("⏳ Billz'dan ma'lumot olinmoqda…")
-    result = await check_service.run_check(gateway, settings)
+    try:
+        result = await check_service.run_check(gateway, settings)
+    except check_service.CheckAlreadyRunning:
+        await notice.edit_text("⏳ Tekshiruv allaqachon ketyapti — tugashini kuting.")
+        return
     await notice.edit_text(texts.check_report(result))
 
 

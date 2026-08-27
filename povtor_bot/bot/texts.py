@@ -60,7 +60,8 @@ def age_label(detected: str, today: date, stale_after_days: int = 0) -> str:
 
 
 def card_caption(
-    rows: list[Any], *, today: date | None = None, stale_after_days: int = 0
+    rows: list[Any], *, today: date | None = None, stale_after_days: int = 0,
+    visible: list[Any] | None = None, page: int = 0, pages: int = 1,
 ) -> str:
     """Artikul kartasi: tovar sarlavhasi + har bir filial/rang qatori.
 
@@ -71,6 +72,7 @@ def card_caption(
         return "Band topilmadi."
 
     head = rows[0]
+    shown = rows if visible is None else visible
     lines = [
         f"<b>{esc(head['product_name'] or 'Nomsiz tovar')}</b>",
         f"Artikul: <code>{esc(head['sku'])}</code>",
@@ -80,9 +82,15 @@ def card_caption(
     if head["supplier"]:
         lines.append(f"Ta'minotchi: {esc(head['supplier'])}")
     lines.append(f"Tannarx: <b>{esc(money(head['price_uzs']))}</b>")
+    if pages > 1:
+        ochiq = sum(1 for r in rows if r["status"] == STATUS_PENDING)
+        lines.append(
+            f"<i>{len(rows)} band ({ochiq} ta hal qilinmagan) · "
+            f"sahifa {page + 1}/{pages}</i>"
+        )
     lines.append("")
 
-    for row in rows:
+    for row in shown:
         icon = STATUS_ICON.get(row["status"], "⚪️")
         shop = esc(row["shop_name"])
         color = f" · {esc(row['color'])}" if row["color"] else ""

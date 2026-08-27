@@ -19,6 +19,7 @@ esa atigi ~200 ta artikul kerak, va ular product_variant jadvalida keshlanadi.
 from __future__ import annotations
 
 import logging
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
@@ -34,6 +35,20 @@ log = logging.getLogger(__name__)
 
 # Rang qo'shiladigan hisobot qatori — transfer yoki sotuv
 _Row = TypeVar("_Row", TransferRow, SalesRow)
+
+# Bir vaqtda bitta tekshiruv. Ikki menejer bir vaqtda /tekshir bossa (yoki
+# qo'lda chaqiruv 09:00 cron'i bilan ustma-ust tushsa) ikkita to'liq sikl
+# ketardi: Billz'ga ikki barobar yuk, va qoldiq snapshoti ikkalasidan
+# aralashib yozilishi mumkin (biri DELETE qilganda ikkinchisi INSERT qilyapti).
+_check_lock = asyncio.Lock()
+
+
+class CheckAlreadyRunning(RuntimeError):
+    """Tekshiruv allaqachon ketyapti."""
+
+
+def is_running() -> bool:
+    return _check_lock.locked()
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,10 +183,22 @@ def _completeness(info: ProductInfo) -> int:
 async def run_check(
     gateway: BillzGateway, settings: Settings, *, today: date | None = None
 ) -> CheckResult:
-    """To'liq tekshiruv sikli."""
-    today = today or date.today()
-    cfg = rule_config(settings)
+    """To'liq tekshiruv sikli.
 
+    Bir vaqtda faqat bittasi ishlaydi; ikkinchisi CheckAlreadyRunning oladi.
+    Navbatga qo'yish foydasiz bo'lardi — ikkinchi tekshiruv birinchisidan
+    ikki daqiqa keyin bir xil natija berardi.
+    """
+    if _check_lock.locked():
+        raise CheckAlreadyRunning
+    async with _check_lock:
+        return await _run_check(gateway, settings, today=today or date.today())
+
+
+async def _run_check(
+    gateway: BillzGateway, settings: Settings, *, today: date
+) -> CheckResult:
+    cfg = rule_config(settings)
     warehouses = set(settings.warehouse_shop_ids)
     if not warehouses:
         return CheckResult(0, 0, 0, error="WAREHOUSE_SHOP_IDS sozlanmagan")

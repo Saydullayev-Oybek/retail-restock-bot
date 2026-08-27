@@ -28,11 +28,17 @@ class SupplierCB(CallbackData, prefix="sup"):
 
 
 class SkuCB(CallbackData, prefix="art"):
-    """3-daraja: artikul tanlandi -> karta ochiladi."""
+    """3-daraja: artikul tanlandi -> karta ochiladi.
+
+    `page` — karta sahifasi. Bir artikulda 35+ band bo'lsa (7 filial x 5 rang)
+    Telegram xabarni butunlay rad etadi (tugma limiti 100), shuning uchun
+    karta sahifalarga bo'linadi.
+    """
 
     cat: int
     sup: int
     ref: int
+    page: int = 0
 
 
 class AnswerCB(CallbackData, prefix="ans"):
@@ -46,6 +52,7 @@ class AnswerCB(CallbackData, prefix="ans"):
     act: str
     cat: int
     sup: int
+    page: int = 0
 
 
 class NavCB(CallbackData, prefix="nav"):

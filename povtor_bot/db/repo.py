@@ -400,7 +400,9 @@ async def card_items(sku: str, detected_date: date | None = None) -> list[aiosql
         f"""
         SELECT * FROM candidate
         WHERE sku = ? {where}
-        ORDER BY shop_name, color
+        -- Javob berilmaganlar OLDINDA: karta sahifalanganda menejer kerakli
+        -- bandlarni birinchi sahifada ko'radi, hal qilinganlari esa oxirida
+        ORDER BY (status <> '{STATUS_PENDING}'), shop_name, color
         """,
         (sku, *params),
     ) as cursor:

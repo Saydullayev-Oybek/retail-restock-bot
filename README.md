@@ -36,6 +36,31 @@ Skript do'konlar ro'yxatini `id  nom` ko'rinishida chiqaradi.
 
 ---
 
+## Doimiy ishlatish (macOS)
+
+Terminal yopilsa bot o'ladi va ertalabki 09:00 tekshiruvi bo'lmaydi.
+`launchd` bilan Mac yonganda avtomatik ishga tushadi va yiqilsa qayta ko'tariladi:
+
+```bash
+cp deploy/com.povtor.bot.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.povtor.bot.plist
+```
+
+To'xtatish: `launchctl unload ~/Library/LaunchAgents/com.povtor.bot.plist`
+Log: `tail -f var/bot.log`
+
+> Uzoq muddatda VPS afzalroq — noutbuk kechqurun yopiladi, 09:00 tekshiruvi
+> esa menejer ishga kelguncha tayyor bo'lishi kerak.
+
+**Bitta nusxa qulfi.** Bot ishga tushganda `var/povtor.lock` faylini band
+qiladi. Ikkinchi nusxa darhol to'xtaydi va ishlab turgan jarayonning PID'ini
+ko'rsatadi. Nega kerak: Telegram bitta token bilan faqat bitta `getUpdates`
+iste'molchisiga ruxsat beradi, va har nusxada o'z cron'i bo'ladi — sinov
+davrida 10 ta jarayon bir vaqtda ishlab qolgan edi.
+
+**Kunlik zaxira nusxa.** 09:00 tekshiruvidan OLDIN olinadi (`var/backup/`,
+14 kun saqlanadi) — bugungi tekshiruv nimanidir buzsa orqaga qaytish mumkin.
+
 ## Buyruqlar
 
 | Buyruq | Ish |

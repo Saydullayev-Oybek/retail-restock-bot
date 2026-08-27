@@ -86,6 +86,12 @@ class Settings(BaseSettings):
 
     # ─── Boshqa ───
     db_path: str = "var/povtor.db"
+    # Bitta nusxa qulfi — ikkinchi bot ishga tushmasligi uchun
+    lock_path: str = "var/povtor.lock"
+    # Kunlik zaxira nusxa. Baza bitta fayl — yo'qolsa menejerlar bergan
+    # barcha javoblar va audit tarixi ketadi.
+    backup_dir: str = "var/backup"
+    backup_keep_days: int = 14
     tz: str = "Asia/Tashkent"
     schedule_time: str = "09:00"
     announce_lookback_days: int = 2

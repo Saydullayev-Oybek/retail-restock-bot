@@ -11,7 +11,6 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup
 
 from povtor_bot.db import repo
-from povtor_bot.bot.texts import card_caption
 from povtor_bot.services import cards, media
 
 from .conftest import TODAY, make_candidate
@@ -213,7 +212,28 @@ class TestUpdateCard:
     async def test_long_caption_falls_back_to_text(self, no_download) -> None:
         """Caption 1024 belgidan oshsa rasm bilan yubora olmaymiz — matnga o'tamiz.
 
-        Real holat: bir artikul ko'p filial va rangda nomzod bo'lsa karta uzayadi.
+        Sahifalash odatda buni oldini oladi (6 ta band ~900 belgi), lekin juda
+        uzun tovar nomi bilan BITTA band ham chegaradan oshishi mumkin —
+        zaxira yo'l ishlashi kerak.
+        """
+        await repo.insert_candidates([make_candidate(product_name="Ж" * 900)])
+        await repo.cache_products([{
+            "sku": "39666", "color": "Белый", "image_url": "https://cdn/x.jpg",
+        }])
+        await repo.set_file_id("39666", "Белый", "FID")
+
+        rows = await repo.card_items("39666", TODAY)
+        assert len(rows) == 1
+        assert len(cards._caption(rows, 0, 0)) > cards._CAPTION_LIMIT
+
+        bot = FakeBot()
+        await cards.send_card(bot, 1, rows, MARKUP)
+        assert bot.names == ["send_message"]
+
+    async def test_many_rows_keep_the_photo(self, no_download) -> None:
+        """Sahifalashdan keyin ko'p bandli karta ham RASM bilan chiqadi.
+
+        Ilgari 20 ta band caption chegarasidan oshib, rasm yo'qolardi.
         """
         await seed_rows(with_image=True)
         await repo.insert_candidates([
@@ -221,11 +241,11 @@ class TestUpdateCard:
             for i in range(20)
         ])
         rows = await repo.card_items("39666", TODAY)
-        assert len(card_caption(rows)) > cards._CAPTION_LIMIT
+        assert len(cards._caption(rows, 0, 0)) <= cards._CAPTION_LIMIT
 
         bot = FakeBot()
         await cards.send_card(bot, 1, rows, MARKUP)
-        assert bot.names == ["send_message"]
+        assert bot.names == ["send_photo"]
 
     async def test_not_modified_is_swallowed(self) -> None:
         """Bir tugmani ikki marta bosish xato bermasligi kerak."""
@@ -324,3 +344,104 @@ class TestImageUrl:
             assert cached["image_missing"] == 0
         finally:
             get_settings.cache_clear()
+
+
+class TestCardPagination:
+    """Karta sahifalanadi.
+
+    35 ta band (7 filial x 5 rang) Telegram'ning 100 tugma chegarasidan
+    oshib ketardi va xabar BUTUNLAY rad etilardi — menejer nima bo'lganini
+    bilmasdi. Sahifa hajmi 8 ta band: 24 tugma va ~950 belgi, ya'ni karta
+    RASM bilan chiqishda davom etadi.
+    """
+
+    async def _many(self, n: int):
+        from datetime import timedelta
+        await repo.insert_candidates([
+            make_candidate(shop_id=f"s{i}", shop_name=f"FILIAL-{i}",
+                           color=f"Rang-{i}", arrived_date=TODAY - timedelta(days=2))
+            for i in range(n)
+        ])
+        return await repo.card_items("39666")
+
+    async def test_fifty_items_never_exceed_hard_limits(self, no_download) -> None:
+        """QATTIQ chegara: oshsa Telegram xabarni butunlay rad etadi."""
+        from povtor_bot.bot import keyboards
+        from povtor_bot.services.cards import _caption
+
+        rows = await self._many(50)
+        _, _, pages = keyboards.page_slice(rows, 0)
+        assert pages > 1
+        for page in range(pages):
+            caption = _caption(rows, 5, page)
+            kb = keyboards.card_kb(rows, 1, 1, sku_ref=1, page=page)
+            buttons = sum(len(r) for r in kb.inline_keyboard)
+            assert buttons <= 100, f"{page}-sahifa: {buttons} tugma"
+            assert len(caption) <= 4096, f"{page}-sahifa: {len(caption)} belgi"
+
+    async def test_pages_usually_fit_the_caption_limit(self, no_download) -> None:
+        """YUMSHOQ chegara: oshsa rasm ko'rsatilmaydi (xato emas, lekin achinarli)."""
+        from povtor_bot.bot import keyboards
+        from povtor_bot.services.cards import _caption
+
+        rows = await self._many(50)
+        _, _, pages = keyboards.page_slice(rows, 0)
+        sigdi = sum(1 for p in range(pages) if len(_caption(rows, 5, p)) <= 1024)
+        assert sigdi == pages, f"{pages - sigdi} sahifa rasmsiz qoladi"
+
+    async def test_pending_items_come_first(self) -> None:
+        from povtor_bot.bot import keyboards
+        from povtor_bot.core.models import STATUS_TAKEN
+
+        rows = await self._many(20)
+        for r in rows[:5]:
+            await repo.answer_candidate(r["id"], status=STATUS_TAKEN, user_id=1)
+        rows = await repo.card_items("39666")
+        first_page, _, _ = keyboards.page_slice(rows, 0)
+        assert all(r["status"] == "pending" for r in first_page)
+
+    async def test_page_out_of_range_is_clamped(self) -> None:
+        from povtor_bot.bot import keyboards
+
+        rows = await self._many(10)
+        visible, page, pages = keyboards.page_slice(rows, 999)
+        assert page == pages - 1 and visible
+
+    async def test_single_page_has_no_nav_buttons(self, no_download) -> None:
+        from povtor_bot.bot import keyboards
+
+        rows = await self._many(3)
+        kb = keyboards.card_kb(rows, 1, 1, sku_ref=1, page=0)
+        labels = [b.text for row in kb.inline_keyboard for b in row]
+        assert "◀️" not in labels and "▶️" not in labels
+
+
+class TestSendFailureIsReported:
+    """Karta yuborilmasa menejer sababini ko'rishi kerak.
+
+    Jim yiqilish eng yomoni: tugma bosildi, hech nima bo'lmadi, va menejer
+    botni "buzilgan" deb hisoblaydi.
+    """
+
+    async def test_failure_produces_a_message(self, no_download) -> None:
+        class Broken(FakeBot):
+            async def send_message(self, chat_id, text, reply_markup=None, **kw):
+                self.calls.append(("send_message", {"text": text}))
+                if "ochilmadi" in text:
+                    return FakeMessage(1)      # xato xabari o'tadi
+                raise TelegramBadRequest(method=None, message="message is too long")
+
+        bot = Broken()
+        rows = await seed_rows(with_image=False)
+        result = await cards.send_card(bot, 1, rows, MARKUP)
+        assert result is None
+        texts = [p.get("text", "") for _, p in bot.calls]
+        assert any("ochilmadi" in t for t in texts)
+
+    async def test_failure_does_not_raise(self, no_download) -> None:
+        class Dead(FakeBot):
+            async def send_message(self, *a, **kw):
+                raise TelegramBadRequest(method=None, message="chat not found")
+
+        rows = await seed_rows(with_image=False)
+        assert await cards.send_card(Dead(), 1, rows, MARKUP) is None

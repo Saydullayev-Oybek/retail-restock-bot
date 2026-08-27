@@ -141,3 +141,92 @@ class TestRawLogPolicy:
                 assert (await cur.fetchone())["n"] == 1
         finally:
             await conn.close()
+
+
+class TestSingletonLock:
+    """Bitta nusxa qulfi.
+
+    Sinov davrida 10 ta jarayon bir vaqtda ishlab qolgan (eng eskisi 22 soat).
+    Telegram bitta token bilan faqat bitta getUpdates iste'molchisiga ruxsat
+    beradi, va har nusxada o'z cron'i bo'ladi — N barobar Billz yuki.
+    """
+
+    def test_second_acquire_is_rejected(self, tmp_path) -> None:
+        import subprocess
+        import sys
+
+        from povtor_bot.singleton import acquire
+
+        lock = str(tmp_path / "bot.lock")
+        acquire(lock)
+
+        # Ikkinchi nusxa ALOHIDA jarayonda bo'lishi kerak: flock bitta jarayon
+        # ichida qayta olinaveradi
+        code = (
+            "import sys; sys.path.insert(0, %r);\n"
+            "from povtor_bot.singleton import acquire, AlreadyRunning\n"
+            "try:\n"
+            "    acquire(%r); print('OLDI')\n"
+            "except AlreadyRunning:\n"
+            "    print('RAD')\n" % (str(__import__('pathlib').Path.cwd()), lock)
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+        )
+        assert out.stdout.strip() == "RAD", out.stderr
+
+    def test_lock_file_holds_the_pid(self, tmp_path) -> None:
+        import os
+
+        from povtor_bot.singleton import acquire
+
+        lock = tmp_path / "pid.lock"
+        acquire(str(lock))
+        assert lock.read_text().strip() == str(os.getpid())
+
+
+class TestBackup:
+    async def test_backup_is_a_usable_copy(self, tmp_path) -> None:
+        from povtor_bot.db import conn, repo
+        from povtor_bot.services import backup
+
+        await conn.close()
+        await conn.connect(str(tmp_path / "src.db"))
+        try:
+            from .conftest import make_candidate
+
+            await repo.insert_candidates([make_candidate()])
+            path = await backup.make_backup(str(tmp_path / "bk"), keep_days=14)
+            assert path is not None and path.exists()
+        finally:
+            await conn.close()
+
+        # Nusxa mustaqil ishlashi kerak
+        import sqlite3
+
+        c = sqlite3.connect(path)
+        assert c.execute("SELECT COUNT(*) FROM candidate").fetchone()[0] == 1
+        assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        c.close()
+
+    async def test_old_backups_are_purged(self, tmp_path) -> None:
+        from datetime import date, timedelta
+
+        from povtor_bot.db import conn
+        from povtor_bot.services import backup
+
+        bk = tmp_path / "bk"
+        bk.mkdir()
+        eski = bk / f"povtor-{(date.today() - timedelta(days=30)).isoformat()}.db"
+        yangi = bk / f"povtor-{(date.today() - timedelta(days=2)).isoformat()}.db"
+        eski.write_text("x")
+        yangi.write_text("x")
+
+        await conn.close()
+        await conn.connect(str(tmp_path / "s.db"))
+        try:
+            await backup.make_backup(str(bk), keep_days=14)
+        finally:
+            await conn.close()
+        assert not eski.exists()
+        assert yangi.exists()
