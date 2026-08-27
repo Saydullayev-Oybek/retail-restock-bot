@@ -1,0 +1,1154 @@
+[
+ {
+  "base_qty": 5,
+  "sold_qty": 5,
+  "percent": 100.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 8,
+  "percent": 100.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 5,
+  "percent": 100.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 5,
+  "percent": 100.0,
+  "days_to_50": 0,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 6,
+  "percent": 100.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 7,
+  "percent": 87.5,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "87.5% sotildi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 5,
+  "percent": 83.3,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "83.3% sotildi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 5,
+  "percent": 83.3,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "83.3% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 4,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 10,
+  "sold_qty": 8,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 4,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 10,
+  "sold_qty": 6,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 6 dona"
+ },
+ {
+  "base_qty": 7,
+  "sold_qty": 4,
+  "percent": 57.1,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 4,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 10,
+  "sold_qty": 5,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 5 dona"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 5,
+  "percent": 62.5,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "62.5% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 5,
+  "percent": 62.5,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "62.5% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 1,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 12,
+  "sold_qty": 7,
+  "percent": 58.3,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "58.3% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 7,
+  "sold_qty": 4,
+  "percent": 57.1,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "57.1% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 12,
+  "sold_qty": 6,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 4,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 5,
+  "percent": 100.0,
+  "days_to_50": 0,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "100% sotildi"
+ },
+ {
+  "base_qty": 9,
+  "sold_qty": 8,
+  "percent": 88.9,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "88.9% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 12,
+  "sold_qty": 9,
+  "percent": 75.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 9 dona"
+ },
+ {
+  "base_qty": 7,
+  "sold_qty": 5,
+  "percent": 71.4,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "1-kunda 50%, 5 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "1-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "2-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 11,
+  "sold_qty": 7,
+  "percent": 63.6,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "3-kunda 50%, 7 dona"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 4,
+  "percent": 50.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "1-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "66.7% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 1,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 12,
+  "sold_qty": 6,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 4,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 14,
+  "sold_qty": 7,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 8,
+  "sold_qty": 4,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 7,
+  "sold_qty": 4,
+  "percent": 57.1,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "57.1% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 2,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 4,
+  "percent": 66.7,
+  "days_to_50": 3,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "3-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 7,
+  "sold_qty": 4,
+  "percent": 57.1,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "1-kunda 50%, 4 dona"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 1,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 12,
+  "sold_qty": 6,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 4,
+  "percent": 80.0,
+  "days_to_50": 1,
+  "grade": "ishonchli",
+  "recommended_qty": 10,
+  "note": "80% sotildi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 3,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 5,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 2,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 5,
+  "sold_qty": 3,
+  "percent": 60.0,
+  "days_to_50": 1,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "60% sotildi — 50% oshdi"
+ },
+ {
+  "base_qty": 6,
+  "sold_qty": 3,
+  "percent": 50.0,
+  "days_to_50": 4,
+  "grade": "oddiy",
+  "recommended_qty": 5,
+  "note": "50% sotildi — 50% oshdi"
+ }
+]

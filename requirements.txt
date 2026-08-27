@@ -1,0 +1,15 @@
+# Telegram bot framework
+aiogram==3.31.0
+# Billz REST API bilan ishlash uchun HTTP klient (async)
+httpx==0.28.1
+# SQLite'ga async kirish — aiogram'ning event loop'ini bloklamaslik uchun
+aiosqlite==0.22.1
+# .env dan sozlamalarni tipizatsiya bilan o'qish
+pydantic-settings==2.15.0
+pydantic==2.13.4
+# Kunlik 09:00 avtomatik tekshiruv
+APScheduler==3.11.3
+# Excel export
+openpyxl==3.1.5
+# Vaqt mintaqasi (Asia/Tashkent) — Linux konteynerlarda kerak
+tzdata==2026.3
