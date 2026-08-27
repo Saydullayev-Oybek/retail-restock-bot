@@ -251,9 +251,31 @@ class TestPagination:
             rows = self.pages[index] if index < len(self.pages) else []
             return {"rows": rows, "count": len(rows)}
 
-    def _gateway(self, pages: list[list[dict]]):
+    def _gateway(self, pages: list[list[dict]], page_limit: int = 500,
+                 concurrency: int = 1):
+        """concurrency=1 — sahifalash mantig'ini aniq tekshirish uchun.
+
+        Guruh-guruh so'ralganda oxirida bir necha ortiqcha (bo'sh) so'rov
+        ketadi, shuning uchun so'rovlar SONINI tekshiradigan testlar ketma-ket
+        rejimda yoziladi. Parallel rejim alohida sinaladi.
+        """
         client = self.StubClient(pages)
-        return gw.BillzGateway(client), client  # type: ignore[arg-type]
+        return (
+            gw.BillzGateway(client, page_limit=page_limit, concurrency=concurrency),
+            client,
+        )  # type: ignore[arg-type]
+
+    async def test_configured_page_limit_is_used(self) -> None:
+        """Sahifa hajmi .env dan keladi — Billz vaqtni har so'rovga sarflaydi,
+        shuning uchun kattaroq sahifa tekshiruvni tezlashtiradi."""
+        gateway, client = self._gateway([[{"i": 1}], []], page_limit=2000)
+        await gateway._paginate("/x", {}, "rows")
+        assert all(p["limit"] == 2000 for p in client.requested)
+
+    async def test_explicit_limit_overrides_config(self) -> None:
+        gateway, client = self._gateway([[{"i": 1}], []], page_limit=2000)
+        await gateway._paginate("/x", {}, "rows", limit=50)
+        assert all(p["limit"] == 50 for p in client.requested)
 
     async def test_collects_every_page(self) -> None:
         pages = [[{"i": i} for i in range(3)], [{"i": 3}, {"i": 4}, {"i": 5}], [{"i": 6}]]
@@ -261,35 +283,59 @@ class TestPagination:
         rows = await gateway._paginate("/x", {}, "rows", limit=3)
         assert [r["i"] for r in rows] == [0, 1, 2, 3, 4, 5, 6]
 
-    async def test_server_capped_page_size_does_not_truncate(self) -> None:
-        """500 so'raldi, server 100 qaytardi — qolgan sahifalar ham o'qilishi SHART.
+    async def test_short_page_in_the_middle_does_not_stop(self) -> None:
+        """⭐ Billz o'rtadagi sahifada kam qator qaytarishi mumkin.
 
-        Bu aynan jim ma'lumot yo'qotish holati: agar to'xtash sharti so'ralgan
-        limit'ga solishtirilsa, katalogning 100 tadan keyingisi umuman
-        o'qilmasdan qolardi.
+        Real ishga tushirishda aynan shu jim ma'lumot yo'qotishga olib keldi:
+        bir tekshiruv 91 nomzod topdi, keyingisi xuddi shu ma'lumotda 7 ta.
         """
-        pages = [
-            [{"i": i} for i in range(100)],
-            [{"i": i} for i in range(100, 200)],
-            [{"i": 200}],
-        ]
-        gateway, client = self._gateway(pages)
-        rows = await gateway._paginate("/v2/products", {}, "rows", limit=500)
-        assert len(rows) == 201
-        assert [p["page"] for p in client.requested] == [1, 2, 3]
-
-    async def test_stops_on_short_page(self) -> None:
         gateway, client = self._gateway([
-            [{"i": i} for i in range(10)], [{"i": 10}],
+            [{"i": i} for i in range(10)],     # to'la
+            [{"i": 100}, {"i": 101}],          # QISQA — lekin oxirgisi emas
+            [{"i": i} for i in range(200, 210)],
+            [],                                 # haqiqiy oxiri
+        ])
+        rows = await gateway._paginate("/x", {}, "rows", limit=10)
+        assert len(rows) == 22                 # qisqa sahifada to'xtamadi
+        assert [p["page"] for p in client.requested] == [1, 2, 3, 4]
+
+    async def test_last_short_page_then_empty(self) -> None:
+        gateway, client = self._gateway([
+            [{"i": i} for i in range(10)], [{"i": 10}], [],
         ])
         rows = await gateway._paginate("/x", {}, "rows", limit=10)
         assert len(rows) == 11
-        assert len(client.requested) == 2      # 3-sahifa so'ralmadi
+        assert len(client.requested) == 3      # bo'sh sahifa bilan tasdiqlandi
 
     async def test_stops_on_empty_first_page(self) -> None:
         gateway, client = self._gateway([[]])
         assert await gateway._paginate("/x", {}, "rows", limit=10) == []
         assert len(client.requested) == 1
+
+    async def test_concurrent_batches_keep_order_and_stop_correctly(self) -> None:
+        """Parallel so'ralganda ham tartib va to'xtash nuqtasi to'g'ri bo'lsin."""
+        pages = [[{"i": p * 10 + j} for j in range(10)] for p in range(7)] + [[]]
+        gateway, client = self._gateway(pages, page_limit=10, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == [p * 10 + j for p in range(7) for j in range(10)]
+
+    async def test_pages_after_the_empty_one_are_discarded(self) -> None:
+        """Bo'shlikdan keyin kelgan sahifa e'tiborga olinmaydi.
+
+        Guruhda 4 ta sahifa birga so'raladi; agar 2-si bo'sh bo'lsa, 3 va 4
+        chi qanday javob qaytarsa ham ma'lumot tugagan hisoblanadi.
+        """
+        pages = [[{"i": 1}], [], [{"i": 99}], [{"i": 98}]]
+        gateway, _ = self._gateway(pages, page_limit=10, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == [1]
+
+    async def test_concurrency_does_not_lose_the_tail(self) -> None:
+        """Sahifalar soni guruh hajmiga bo'linmasa ham hammasi o'qiladi."""
+        pages = [[{"i": p}] for p in range(9)] + [[]]
+        gateway, _ = self._gateway(pages, page_limit=1, concurrency=4)
+        rows = await gateway._paginate("/x", {}, "rows")
+        assert [r["i"] for r in rows] == list(range(9))
 
     async def test_exact_multiple_stops_at_empty_page(self) -> None:
         """Oxirgi sahifa aynan to'la bo'lsa — bo'sh sahifa to'xtatadi."""
@@ -300,7 +346,129 @@ class TestPagination:
         assert len(rows) == 10
         assert [p["page"] for p in client.requested] == [1, 2, 3]
 
+    async def test_server_capped_pages_are_all_read(self) -> None:
+        """500 so'raldi, server 100 qaytardi — hammasi o'qilishi kerak."""
+        gateway, client = self._gateway([
+            [{"i": i} for i in range(100)],
+            [{"i": i} for i in range(100, 200)],
+            [{"i": 200}],
+            [],
+        ])
+        rows = await gateway._paginate("/v2/products", {}, "rows", limit=500)
+        assert len(rows) == 201
+        assert [p["page"] for p in client.requested] == [1, 2, 3, 4]
+
     async def test_params_are_preserved_across_pages(self) -> None:
         gateway, client = self._gateway([[{"i": 0}], []])
         await gateway._paginate("/x", {"shop_ids": "a,b", "currency": "UZS"}, "rows", limit=1)
         assert all(p["shop_ids"] == "a,b" and p["currency"] == "UZS" for p in client.requested)
+
+
+class TestDailyPagination:
+    """Hisobotlar KUN-KUN so'raladi.
+
+    Billz hisobotlari yangisidan eskisiga tartiblangan va tirik: do'kon
+    ishlayotgan paytda har yangi yozuv ro'yxat boshiga qo'shilib, sahifa
+    chegaralarini suradi. Bir xil so'rov turli javob qaytaradi (o'lchovda
+    page=2 uchun -4/+4, keyin -7/+7), va nomzodlar soni sakraydi.
+
+    O'tgan kunlar o'zgarmaydi, shuning uchun har kun alohida so'raladi.
+    """
+
+    class DayClient:
+        """Har kun uchun alohida javob beradigan soxta klient."""
+
+        def __init__(self, by_day: dict[str, list[dict]]) -> None:
+            self.by_day = by_day
+            self.requested: list[dict] = []
+
+        async def get(self, path: str, params: dict) -> dict:
+            self.requested.append(dict(params))
+            day = params["start_date"]
+            rows = self.by_day.get(day, [])
+            # sahifalash: bitta sahifaga sig'adi deb hisoblaymiz
+            return {"rows": rows if params["page"] == 1 else []}
+
+    def _gw(self, by_day):
+        client = self.DayClient(by_day)
+        return gw.BillzGateway(client, page_limit=1000, concurrency=1), client  # type: ignore[arg-type]
+
+    async def test_each_day_is_requested_separately(self) -> None:
+        gateway, client = self._gw({
+            "2026-08-25": [{"transfer_id": "a", "product_id": "1"}],
+            "2026-08-26": [{"transfer_id": "b", "product_id": "1"}],
+            "2026-08-27": [{"transfer_id": "c", "product_id": "1"}],
+        })
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 25), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 3
+        kunlar = [p["start_date"] for p in client.requested if p["page"] == 1]
+        assert kunlar == ["2026-08-25", "2026-08-26", "2026-08-27"]
+        # har so'rovda start_date == end_date
+        assert all(p["start_date"] == p["end_date"] for p in client.requested)
+
+    async def test_duplicates_across_days_are_dropped(self) -> None:
+        """Kun chegarasida bir qator ikki marta chiqishi mumkin — zaxira himoya."""
+        row = {"transfer_id": "a", "product_id": "1"}
+        gateway, _ = self._gw({"2026-08-26": [row], "2026-08-27": [dict(row)]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 26), end=date(2026, 8, 27),
+            dedupe_by=("transfer_id", "product_id"),
+        )
+        assert len(rows) == 1
+
+    async def test_without_dedupe_everything_is_kept(self) -> None:
+        row = {"transfer_id": "a", "product_id": "1"}
+        gateway, _ = self._gw({"2026-08-26": [row], "2026-08-27": [dict(row)]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 26), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 2
+
+    async def test_single_day_range(self) -> None:
+        gateway, client = self._gw({"2026-08-27": [{"transfer_id": "a", "product_id": "1"}]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 27), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 1
+        assert {p["start_date"] for p in client.requested} == {"2026-08-27"}
+
+    async def test_empty_days_are_skipped_silently(self) -> None:
+        gateway, _ = self._gw({"2026-08-27": [{"transfer_id": "a", "product_id": "1"}]})
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 24), end=date(2026, 8, 27)
+        )
+        assert len(rows) == 1
+
+
+class TestSalesAreNotDeduped:
+    """Sotuv hisoboti DEDUPE QILINMASLIGI kerak.
+
+    Billz bir (kun, filial, tovar) uchun bir NECHTA qator qaytaradi — har xil
+    narx/chegirma bo'yicha, va ularning har biri alohida haqiqiy sotuv.
+    Real o'lchov: bitta artikulda 11 ta qator (1472, 1384, 3000, 2872 so'm).
+    (date, shop_id, product_id) bo'yicha birlashtirish sotuvning 16% ini
+    yo'q qilgan edi.
+    """
+
+    class Client:
+        def __init__(self, rows): self.rows = rows
+        async def get(self, path, params):
+            return {"products_stats_by_date": self.rows if params["page"] == 1 else []}
+
+    async def test_same_product_multiple_price_rows_are_all_kept(self) -> None:
+        rows = [
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 1},
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 2},
+            {"date": "2026-08-24 00:00:00", "shop_id": "s1", "product_id": "p1",
+             "product_sku": "21206", "net_sold_measurement_value": 2},
+        ]
+        gateway = gw.BillzGateway(self.Client(rows), page_limit=1000, concurrency=1)  # type: ignore[arg-type]
+        sales = await gateway.sales(
+            start=date(2026, 8, 24), end=date(2026, 8, 24), shop_ids=["s1"]
+        )
+        assert len(sales) == 3
+        assert sum(s.quantity for s in sales) == 5   # 1 + 2 + 2, birlashtirilmagan

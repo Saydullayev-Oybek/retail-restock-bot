@@ -12,8 +12,9 @@ ni yiqitmasligi kerak.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..core.models import ProductInfo, SalesRow, Shop, StockRow, TransferRow
@@ -28,8 +29,16 @@ COLOR_FIELD_NAMES = ("цвет", "color", "rang", "tus")
 SUBCATEGORY_FIELD_NAMES = ("подкатегория", "subcategory", "podkategoriya")
 KIND_FIELD_NAMES = ("вид", "kind", "tur")
 
-_PAGE_LIMIT = 500
+# Billz hisobot dvigateli vaqtni QATOR soniga emas, HAR SO'ROVGA sarflaydi:
+# o'lchovda 500 qator 4.2s, 2000 qator 3.3s keldi. Shuning uchun sahifa
+# kattaroq bo'lgani yaxshi — so'rovlar soni kamayadi, vaqt esa o'zgarmaydi.
+# 1000 — hujjatda ko'rsatilgan maksimum (product-general-table uchun).
+_PAGE_LIMIT = 1000
 _MAX_PAGES = 200   # cheksiz sikldan himoya
+# Bir vaqtda nechta sahifa so'ralsin. Tezlik chegarasini oshirmaydi —
+# token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
+# vaqtlari ustma-ust tushadi.
+_CONCURRENCY = 4
 
 
 def _pick(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -177,48 +186,109 @@ def _count_of(payload: dict[str, Any]) -> int:
 class BillzGateway:
     """Yuqori darajali chaqiruvlar — hammasi domen modellarini qaytaradi."""
 
-    def __init__(self, client: BillzClient) -> None:
+    def __init__(
+        self, client: BillzClient, page_limit: int = _PAGE_LIMIT,
+        concurrency: int = _CONCURRENCY,
+    ) -> None:
         self._client = client
+        self._page_limit = max(1, page_limit)
+        self._concurrency = max(1, concurrency)
 
     # ───────────────────────── sahifalash ─────────────────────────
 
     async def _paginate(
-        self, path: str, params: dict[str, Any], *keys: str, limit: int = _PAGE_LIMIT
+        self, path: str, params: dict[str, Any], *keys: str, limit: int | None = None
     ) -> list[dict[str, Any]]:
-        """Barcha sahifalarni yig'adi.
+        """Barcha sahifalarni yig'adi. To'xtash sharti — BO'SH sahifa.
 
-        Ikkita nozik joy bor:
+        Nega "qisqa sahifa = oxirgi sahifa" emas: Billz o'rtadagi sahifada
+        so'ralganidan kam qator qaytarishi mumkin (yuk, throttling, ichki
+        filtrlash). Qisqa sahifada to'xtasak, qolgan sahifalar JIM o'qilmay
+        qoladi va natija noto'g'ri chiqadi — xato ham berilmaydi.
 
-        1. `count` ga tayanmaymiz — ba'zi Billz hisobotlarida u umumiy son emas,
-           sahifadagi qatorlar soni bo'lib chiqadi.
+        Bu real ishga tushirishda kuzatildi: bir tekshiruv 91 nomzod topdi,
+        30 daqiqadan keyingisi xuddi shu ma'lumotda 7 ta.
 
-        2. "Qisqa sahifa = oxirgi sahifa" qoidasi SO'RALGAN limit'ga emas,
-           serverning HAQIQIY sahifa hajmiga solishtiriladi. Billz limit'ni
-           o'zicha kamaytirishi mumkin (masalan 500 so'ralganda 100 qaytaradi);
-           so'ralgan qiymatga solishtirsak birinchi sahifadanoq to'xtab,
-           katalogning qolganini JIM o'tkazib yuborardik.
+        Sahifalar GURUH-GURUH parallel so'raladi. Nega: Billz hisobot
+        dvigateli bitta sahifani ~3 sekund hisoblaydi, va ketma-ket
+        so'raganda bot shuncha vaqt bo'sh kutadi — haqiqiy tezlik 0.3 so'rov/sek
+        bo'lib qoladi, Billz ruxsat bergan 2 dan olti barobar kam. Parallel
+        so'rovlar tezlik chegarasini OSHIRMAYDI (token-bucket baribir 1.5 rps
+        da ushlab turadi), faqat kutish vaqtlari ustma-ust tushadi.
+
+        Narxi: oxirgi guruhda bir necha ortiqcha (bo'sh) so'rov ketishi mumkin.
+        """
+        limit = limit or self._page_limit
+        collected: list[dict[str, Any]] = []
+        page = 1
+        while page <= _MAX_PAGES:
+            batch = range(page, min(page + self._concurrency, _MAX_PAGES + 1))
+            payloads = await asyncio.gather(*[
+                self._client.get(path, {**params, "page": p, "limit": limit})
+                for p in batch
+            ])
+            finished = False
+            for payload in payloads:
+                rows = _rows_of(payload, *keys)
+                if not rows:
+                    # Shu sahifadan keyingilari e'tiborga olinmaydi: ular
+                    # bo'shlikdan keyin kelgan, ya'ni ma'lumot tugagan
+                    finished = True
+                    break
+                collected.extend(rows)
+            if finished:
+                break
+            page += len(batch)
+        else:
+            log.warning(
+                "%s: %d sahifadan oshdi, qolgani o'qilmadi (%d qator yig'ildi)",
+                path, _MAX_PAGES, len(collected),
+            )
+        log.debug("%s: %d qator", path, len(collected))
+        return collected
+
+    async def _paginate_by_day(
+        self, path: str, params: dict[str, Any], *keys: str,
+        start: date, end: date, dedupe_by: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Davrni KUNLARGA bo'lib so'raydi.
+
+        Nega: Billz hisobotlari yangisidan eskisiga tartiblangan va tirik —
+        do'kon ishlayotgan paytda har yangi yozuv ro'yxat BOSHIGA qo'shilib,
+        qolganini bir pozitsiya suradi. Natijada `page=2` ni ikki marta
+        so'raganda chegara siljiydi: ba'zi qatorlar ikki marta tushadi,
+        ba'zilari umuman tushmaydi.
+
+        O'lchov (bir xil so'rov, ketma-ket): page=2 uchun -4/+4, keyin -7/+7.
+        Shu sababli nomzodlar soni har tekshiruvda 92..96 orasida sakrardi.
+
+        O'tgan kunlar esa O'ZGARMAYDI — 23-avgustga endi yangi transfer
+        qo'shilmaydi. Faqat bugungi kun tirik, va u bitta sahifaga sig'adi.
+
+        `dedupe_by` — qolgan takrorlanishlarga qarshi zaxira.
         """
         collected: list[dict[str, Any]] = []
-        page_size: int | None = None
-        for page in range(1, _MAX_PAGES + 1):
-            payload = await self._client.get(
-                path, {**params, "page": page, "limit": limit}
-            )
-            rows = _rows_of(payload, *keys)
-            if not rows:
-                break
-            collected.extend(rows)
-            if page_size is None:
-                page_size = len(rows)
-                if page_size < limit:
-                    log.debug(
-                        "%s: limit=%d so'raldi, server %d qaytardi", path, limit, page_size
-                    )
-            if len(rows) < page_size:
-                break
-        else:
-            log.warning("%s: %d sahifadan oshdi, qolgani o'qilmadi", path, _MAX_PAGES)
-        return collected
+        day = start
+        while day <= end:
+            iso = day.isoformat()
+            collected.extend(await self._paginate(
+                path, {**params, "start_date": iso, "end_date": iso}, *keys
+            ))
+            day += timedelta(days=1)
+
+        if not dedupe_by:
+            return collected
+        seen: set[tuple[Any, ...]] = set()
+        unique: list[dict[str, Any]] = []
+        for row in collected:
+            key = tuple(row.get(f) for f in dedupe_by)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        if len(unique) != len(collected):
+            log.debug("%s: %d takror qator tashlandi", path, len(collected) - len(unique))
+        return unique
 
     # ───────────────────────── metodlar ─────────────────────────
 
@@ -289,12 +359,15 @@ class BillzGateway:
     ) -> list[TransferRow]:
         """GET /v1/transfer-report-table — SKLAD -> filial harakatlari."""
         params = {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
             "shop_ids": ",".join(shop_ids),
             "display_currency": "UZS",
         }
-        rows = await self._paginate("/v1/transfer-report-table", params, "rows")
+        rows = await self._paginate_by_day(
+            "/v1/transfer-report-table", params, "rows",
+            start=start, end=end,
+            # bir transfer ichida bir tovar bir marta uchraydi
+            dedupe_by=("transfer_id", "product_id"),
+        )
         result: list[TransferRow] = []
         for row in rows:
             arrived = parse_date(_pick(row, "accepted_at", "created_at"))
@@ -335,15 +408,19 @@ class BillzGateway:
         yakuniy summa emas, kunlar kesimi kerak.
         """
         params = {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
             "shop_ids": ",".join(shop_ids),
             "currency": "UZS",
             "detalization": "day",
         }
         # Javobdagi ro'yxat kaliti — `products_stats_by_date` (hujjatda ko'rsatilmagan)
-        rows = await self._paginate(
-            "/v1/product-general-table", params, "products_stats_by_date", "rows", "products"
+        # DEDUPE YO'Q: sotuv hisoboti bir (kun, filial, tovar) uchun bir NECHTA
+        # qator qaytaradi — har xil narx/chegirma bo'yicha, va ularning har biri
+        # alohida haqiqiy sotuv. (date, shop_id, product_id) bo'yicha birlashtirish
+        # o'lchovda sotuvning 16% ini yo'q qilgan edi.
+        rows = await self._paginate_by_day(
+            "/v1/product-general-table", params,
+            "products_stats_by_date", "rows", "products",
+            start=start, end=end,
         )
         result: list[SalesRow] = []
         for row in rows:

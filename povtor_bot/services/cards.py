@@ -34,13 +34,19 @@ def _is_not_modified(exc: TelegramBadRequest) -> bool:
 
 
 async def send_card(
-    bot: Bot, chat_id: int, rows: list[Any], markup: InlineKeyboardMarkup
+    bot: Bot, chat_id: int, rows: list[Any], markup: InlineKeyboardMarkup,
+    *, stale_after_days: int = 0,
 ) -> Message | None:
-    """Yangi karta yuboradi (rasm bilan yoki matn sifatida)."""
+    """Yangi karta yuboradi (rasm bilan yoki matn sifatida).
+
+    `stale_after_days` — bandning yoshi shu kundan oshsa kartada ogohlantirish
+    belgisi qo'yiladi. Odatda oynaning kengligi (WINDOW_DAYS) beriladi: undan
+    oshgan band /tekshir da endi qayta aniqlanmaydi.
+    """
     if not rows:
         return None
     sku, color = rows[0]["sku"], rows[0]["color"]
-    caption = card_caption(rows)
+    caption = card_caption(rows, stale_after_days=stale_after_days)
     photo = await media.resolve_photo(sku, color)
 
     if photo is not None and len(caption) <= _CAPTION_LIMIT:
@@ -59,13 +65,13 @@ async def send_card(
 
 async def update_card(
     bot: Bot, chat_id: int, message_id: int, rows: list[Any],
-    markup: InlineKeyboardMarkup,
+    markup: InlineKeyboardMarkup, *, stale_after_days: int = 0,
 ) -> None:
     """Mavjud kartani yangilaydi; tur mos kelmasa qayta yuboradi."""
     if not rows:
         return
     sku, color = rows[0]["sku"], rows[0]["color"]
-    caption = card_caption(rows)
+    caption = card_caption(rows, stale_after_days=stale_after_days)
 
     known = await repo.get_card(chat_id, message_id)
     had_photo = bool(known["has_photo"]) if known else False
@@ -77,7 +83,7 @@ async def update_card(
     if had_photo != wants_photo:
         # Tur o'zgardi — tahrirlab bo'lmaydi, eskisini o'chirib yangisini yuboramiz
         await delete_quietly(bot, chat_id, message_id)
-        await send_card(bot, chat_id, rows, markup)
+        await send_card(bot, chat_id, rows, markup, stale_after_days=stale_after_days)
         return
 
     try:
@@ -96,7 +102,7 @@ async def update_card(
             return   # bir xil mazmun — hech narsa qilinmaydi
         log.warning("Karta tahrirlanmadi, qayta yuboriladi: %s", exc)
         await delete_quietly(bot, chat_id, message_id)
-        await send_card(bot, chat_id, rows, markup)
+        await send_card(bot, chat_id, rows, markup, stale_after_days=stale_after_days)
 
 
 async def _send_photo(

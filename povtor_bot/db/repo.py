@@ -276,10 +276,20 @@ _CANDIDATE_COLUMNS = (
 
 
 async def insert_candidates(candidates: Sequence[Candidate]) -> int:
-    """Yangi nomzodlarni yozadi; avval saqlangani o'zgarmaydi.
+    """Nomzodlarni yozadi. Qaytadi: YANGI qo'shilganlar soni.
 
-    INSERT OR IGNORE + UNIQUE(detected_date, shop_id, sku, color): /tekshir
-    kuniga bir necha marta ishlasa ham menejer bergan javob yo'qolmaydi.
+    Uch xil holat:
+
+    * yangi partiya                -> qator qo'shiladi
+    * mavjud partiya, javob berilmagan -> statistikasi YANGILANADI
+      (sotuv o'sib boradi, menejer eskirgan raqamni ko'rmasligi kerak)
+    * mavjud partiya, javob berilgan   -> TEGILMAYDI
+
+    Oxirgisi eng muhimi: /tekshir kuniga necha marta ishlasa ham va ertaga
+    ham qayta ishlaganda, menejer bergan javob yo'qolmaydi.
+
+    `detected_date` ataylab yangilanmaydi — u "bu bandni birinchi marta qachon
+    ko'rsatgan edik" degan ma'noni saqlaydi, kartadagi yosh shundan hisoblanadi.
     """
     if not candidates:
         return 0
@@ -298,7 +308,21 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         before = (await cursor.fetchone())["n"]
         await db().executemany(
-            f"INSERT OR IGNORE INTO candidate ({_CANDIDATE_COLUMNS}) VALUES ({placeholders})",
+            f"""
+            INSERT INTO candidate ({_CANDIDATE_COLUMNS}) VALUES ({placeholders})
+            ON CONFLICT (shop_id, sku, color, arrived_date) DO UPDATE SET
+                base_qty        = excluded.base_qty,
+                sold_qty        = excluded.sold_qty,
+                percent         = excluded.percent,
+                days_to_50      = excluded.days_to_50,
+                grade           = excluded.grade,
+                recommended_qty = excluded.recommended_qty,
+                note            = excluded.note,
+                price_uzs       = excluded.price_uzs,
+                product_name    = excluded.product_name,
+                image_url       = excluded.image_url
+            WHERE candidate.status = '{STATUS_PENDING}'
+            """,
             payload,
         )
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
@@ -443,15 +467,21 @@ async def reset_candidate(candidate_id: int, user_id: int) -> bool:
     return changed
 
 
-async def answered_for_export(detected_date: date) -> list[aiosqlite.Row]:
-    """Export uchun: kunning javob berilgan bandlari, filial bo'yicha tartiblangan."""
+async def answered_for_export(report_date: date) -> list[aiosqlite.Row]:
+    """Export uchun: SHU KUNI javob berilgan bandlar.
+
+    Nega answered_at bo'yicha, detected_date emas: band bir necha kun oldin
+    aniqlanib, bugun hal qilingan bo'lishi mumkin. "Kunning hisoboti" — bugun
+    qanday QAROR qabul qilinganini ko'rsatishi kerak.
+    """
     async with db().execute(
         f"""
         SELECT * FROM candidate
-        WHERE detected_date = ? AND status IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
+        WHERE date(answered_at) = ?
+          AND status IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
         ORDER BY shop_name, percent DESC, sku, color
         """,
-        (detected_date.isoformat(),),
+        (report_date.isoformat(),),
     ) as cursor:
         return list(await cursor.fetchall())
 
@@ -591,8 +621,35 @@ async def replace_stock_snapshot(
                 """,
                 [(*row, snapshot_date.isoformat()) for row in rows],
             )
+        # Yozilgan vaqtni SQLite'ning o'z soati bilan belgilaymiz — yoshi ham
+        # shu soatga nisbatan hisoblanadi, ya'ni vaqt mintaqasi chalkashmaydi
+        await db().execute(
+            """
+            INSERT INTO kv (key, value, updated_at)
+            VALUES ('stock_synced_at', datetime('now'), datetime('now'))
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value,
+                                            updated_at = excluded.updated_at
+            """
+        )
         await db().commit()
     return len(rows)
+
+
+async def stock_snapshot_rows() -> int:
+    async with db().execute("SELECT COUNT(*) AS n FROM stock_snapshot") as cursor:
+        return (await cursor.fetchone())["n"]
+
+
+async def stock_snapshot_age_hours() -> float | None:
+    """Qoldiq snapshoti necha soat oldin yozilgan. Bo'sh bo'lsa None."""
+    raw = await kv_get("stock_synced_at")
+    if not raw:
+        return None
+    async with db().execute(
+        "SELECT (julianday('now') - julianday(?)) * 24 AS h", (raw,)
+    ) as cursor:
+        row = await cursor.fetchone()
+    return float(row["h"]) if row and row["h"] is not None else None
 
 
 async def other_shops_with_stock(

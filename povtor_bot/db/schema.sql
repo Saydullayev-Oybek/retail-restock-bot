@@ -42,8 +42,16 @@ CREATE TABLE IF NOT EXISTS candidate (
     answered_at       TEXT,
     created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
 
-    -- Idempotentlik: /tekshir kuniga bir necha marta ishlasa ham dublikat tug'ilmaydi
-    UNIQUE (detected_date, shop_id, sku, color)
+    -- Idempotentlik PARTIYAga bog'langan, kunga emas.
+    --
+    -- Nega arrived_date, detected_date emas: bitta partiya oyna ichida bir necha
+    -- kun turadi va har kungi /tekshir uni qayta topadi. Kalitda detected_date
+    -- bo'lsa har kuni YANGI qator yaratilardi — menejer bir bandni bir necha
+    -- marta ko'rib, bir necha marta buyurtma berib yuborishi mumkin edi.
+    --
+    -- Yangi partiya kelsa (boshqa arrived_date) — bu haqiqatan yangi qaror,
+    -- va u alohida qator sifatida qo'shiladi.
+    UNIQUE (shop_id, sku, color, arrived_date)
 );
 
 -- Kaskad menyu shu indekslar ustida ishlaydi (kategoriya -> postavshik -> artikul)

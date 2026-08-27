@@ -94,8 +94,13 @@ async def cmd_announce(
 
 @router.message(Command("export"))
 async def cmd_export(message: Message) -> None:
-    """Kunning javob berilgan bandlarini xlsx qilib qaytaradi."""
-    report_date = await repo.latest_detected_date() or date.today()
+    """BUGUN javob berilgan bandlarni xlsx qilib qaytaradi.
+
+    Sana javob berilgan kun bo'yicha olinadi (aniqlangan kun emas): band bir
+    necha kun oldin aniqlanib, bugun hal qilingan bo'lishi mumkin, va kunlik
+    hisobot aynan bugungi QARORLARNI ko'rsatishi kerak.
+    """
+    report_date = date.today()
     rows = await repo.answered_for_export(report_date)
     if not rows:
         await message.answer(

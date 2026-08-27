@@ -65,7 +65,7 @@ class FakeGateway:
 
 def make_settings(**overrides) -> Settings:
     base = dict(
-        bot_token="x", allowed_user_ids=[1], warehouse_shop_id=WAREHOUSE,
+        bot_token="x", allowed_user_ids=[1], warehouse_shop_ids=[WAREHOUSE],
         billz_secret_token="s", allowed_category_groups=[],
     )
     base.update(overrides)
@@ -98,9 +98,9 @@ def a_sale(shop, sku, color, day, qty, *, product_id=None) -> SalesRow:
 class TestGuards:
     async def test_missing_warehouse_id_reports_error(self) -> None:
         result = await check_service.run_check(
-            FakeGateway(), make_settings(warehouse_shop_id=""), today=TODAY
+            FakeGateway(), make_settings(warehouse_shop_ids=[]), today=TODAY
         )
-        assert not result.ok and "WAREHOUSE_SHOP_ID" in result.error
+        assert not result.ok and "WAREHOUSE_SHOP_IDS" in result.error
 
     async def test_no_filials_reports_error(self) -> None:
         gateway = FakeGateway(shops=[Shop(WAREHOUSE, "SKLAD")])
@@ -317,3 +317,111 @@ class TestAnnouncePrice:
                  "price_uzs": 260400, "shops": [("ANDALUS", 7)], "keys": []}
         await announce_service.announce(Bot(), 1, [entry], usd_rate=0.0)
         assert sent and "260 400 so'm" in sent[0]
+
+
+class TestMultipleWarehouses:
+    """Tarmoqda ikkita sklad bor: import skladi va sezon skladi.
+
+    Qaysilari "yangi partiya" manbai hisoblanishi .env dagi ro'yxat bilan
+    belgilanadi — filial<->filial ko'chirishlari esa hech qachon hisoblanmaydi.
+    """
+
+    SEASON = "sezon-sklad-uuid"
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            shops=[
+                Shop(WAREHOUSE, "СКЛАД ПРИХОДА"),
+                Shop(self.SEASON, "BUTTON СКЛАД MEN"),
+                Shop("shop1", "ANDALUS"),
+            ],
+            transfers=[
+                a_transfer("shop1", "import", "Белый", TODAY - timedelta(days=1), 5),
+                a_transfer("shop1", "sezon", "Белый", TODAY - timedelta(days=1), 5,
+                           from_shop_id=self.SEASON),
+                a_transfer("shop1", "filial", "Белый", TODAY - timedelta(days=1), 5,
+                           from_shop_id="shop2"),
+            ],
+            sales=[
+                a_sale("shop1", "import", "Белый", TODAY, 5),
+                a_sale("shop1", "sezon", "Белый", TODAY, 5),
+                a_sale("shop1", "filial", "Белый", TODAY, 5),
+            ],
+            products=[
+                a_product(sku="import"), a_product(sku="sezon"), a_product(sku="filial"),
+            ],
+        )
+
+    async def test_season_warehouse_is_excluded_by_default(self) -> None:
+        """Biznes qarori: sezon skladidan qaytgan tovar nomzod bo'lmaydi.
+
+        POVTOR faqat YANGI kelgan tovar uchun — sezoni o'tgan kolleksiyani
+        bozordan qayta topib bo'lmaydi, ya'ni "yana ol" tavsiyasi ma'nosiz.
+        """
+        settings = make_settings(warehouse_shop_ids=[WAREHOUSE], filial_shop_ids=["shop1"])
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        skus = {r["sku"] for r in await repo.card_items("import", TODAY)}
+        assert skus == {"import"}
+        assert await repo.card_items("sezon", TODAY) == []
+        assert await repo.card_items("filial", TODAY) == []
+
+    async def test_second_warehouse_can_be_added(self) -> None:
+        settings = make_settings(
+            warehouse_shop_ids=[WAREHOUSE, self.SEASON], filial_shop_ids=["shop1"]
+        )
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.total_found == 2
+        assert len(await repo.card_items("sezon", TODAY)) == 1
+        # filial<->filial baribir hisoblanmaydi
+        assert await repo.card_items("filial", TODAY) == []
+
+    async def test_filials_default_to_everything_except_warehouses(self) -> None:
+        """FILIAL_SHOP_IDS bo'sh bo'lsa — ro'yxatdagi skladlardan boshqa hammasi."""
+        settings = make_settings(warehouse_shop_ids=[WAREHOUSE, self.SEASON])
+        ids, _ = await check_service.resolve_filial_ids(self._gateway(), settings)
+        assert ids == ["shop1"]
+
+
+class TestStockRefreshCache:
+    """Qoldiq hisoboti eng katta (sahifalarning ~57% i), lekin u faqat
+    "boshqa filialda bormi?" savoliga javob beradi — bir necha soatlik
+    eskilik zarar qilmaydi."""
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 5)],
+            stock=[StockRow("shop2", "1", "Белый", 4)],
+            products=[a_product(sku="1")],
+        )
+
+    async def test_first_run_fetches_stock(self) -> None:
+        gw = self._gateway()
+        await check_service.run_check(gw, make_settings(), today=TODAY)
+        assert "stock" in gw.calls
+        assert await repo.stock_snapshot_rows() == 1
+
+    async def test_second_run_skips_stock(self) -> None:
+        settings = make_settings(stock_refresh_hours=6)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        gw2 = self._gateway()
+        result = await check_service.run_check(gw2, settings, today=TODAY)
+        assert "stock" not in gw2.calls
+        # eski snapshot saqlanib qoladi — transfer taklifi ishlashda davom etadi
+        assert await repo.stock_snapshot_rows() == 1
+        assert result.stock_rows == 1
+
+    async def test_transfer_hint_still_works_after_skip(self) -> None:
+        settings = make_settings(stock_refresh_hours=6)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        rows = await repo.other_shops_with_stock("1", "Белый", exclude_shop_id="shop1")
+        assert [(r["shop_name"], r["quantity"]) for r in rows] == [("BERUNIY", 4)]
+
+    async def test_zero_hours_always_refreshes(self) -> None:
+        settings = make_settings(stock_refresh_hours=0)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        gw2 = self._gateway()
+        await check_service.run_check(gw2, settings, today=TODAY)
+        assert "stock" in gw2.calls

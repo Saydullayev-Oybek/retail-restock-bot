@@ -47,8 +47,23 @@ class Settings(BaseSettings):
     billz_base_url: str = "https://api-admin.billz.ai"
     billz_platform_id: str = "7d4a4c38-dd84-4902-b744-0488b80a4c01"
     billz_rate_limit_rps: float = 1.5
+    # Hisobot sahifasidagi qatorlar soni. Billz vaqtni QATOR soniga emas, har
+    # SO'ROVGA sarflaydi (o'lchov: 500 qator 4.2s, 2000 qator 3.3s), shuning
+    # uchun katta sahifa tekshiruvni sezilarli tezlashtiradi.
+    # 1000 — hujjatdagi maksimum. 2000 ham sinovda toza ishladi.
+    billz_page_limit: int = 1000
+    # Bir vaqtda nechta sahifa so'ralsin. Tezlik chegarasini OSHIRMAYDI —
+    # token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
+    # vaqtlari ustma-ust tushadi.
+    billz_concurrency: int = 4
+    # Qoldiq snapshoti necha soat "yangi" hisoblansin. U eng katta hisobot
+    # (vaqtning ~57% i), lekin faqat "boshqa filialda bormi?" savoliga
+    # javob beradi — bir necha soatlik eskilik zarar qilmaydi.
+    stock_refresh_hours: int = 6
 
-    warehouse_shop_id: str = ""
+    # Sklad bitta emas: tarmoqda import skladi va sezoni o'tgan tovar skladi bor.
+    # Qaysilari "yangi partiya" manbai hisoblanishi shu ro'yxat bilan belgilanadi.
+    warehouse_shop_ids: CsvStrs = Field(default_factory=list)
     filial_shop_ids: CsvStrs = Field(default_factory=list)
     # Billz `main_image_url` da faqat fayl nomini qaytaradi ("<uuid>.jpg").
     # To'liq manzil uchun CDN bazasi kerak; bo'sh bo'lsa kartalar matn holida chiqadi.
@@ -84,7 +99,8 @@ class Settings(BaseSettings):
         return [int(x) for x in _split_csv(v)]  # type: ignore[arg-type]
 
     @field_validator(
-        "filial_shop_ids", "allowed_category_groups", mode="before"
+        "warehouse_shop_ids", "filial_shop_ids", "allowed_category_groups",
+        mode="before",
     )
     @classmethod
     def _parse_str_list(cls, v: object) -> list[str]:

@@ -8,7 +8,7 @@ Ikkalasi ham "jim buziladigan" xatolar sinfiga kiradi.
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 
@@ -50,11 +50,48 @@ class TestInsertCandidates:
         ])
         assert await repo.open_count(TODAY) == 3
 
-    async def test_next_day_is_a_new_row(self) -> None:
+    async def test_next_day_does_not_duplicate_the_same_batch(self) -> None:
+        """Ertangi /tekshir o'sha partiyani QAYTA yozmasligi kerak.
+
+        Partiya oyna ichida bir necha kun turadi va har kungi tekshiruv uni
+        qayta topadi. Agar har safar yangi qator yaratilsa, menejer bir bandni
+        bir necha marta ko'rib, bir necha marta buyurtma berib yuborardi.
+        """
         await repo.insert_candidates([make_candidate()])
-        await repo.insert_candidates([make_candidate(detected_date=TODAY + timedelta(days=1))])
-        assert await repo.open_count(TODAY) == 1
-        assert await repo.open_count(TODAY + timedelta(days=1)) == 1
+        yangi = await repo.insert_candidates([
+            make_candidate(detected_date=TODAY + timedelta(days=1), sold_qty=5)
+        ])
+        assert yangi == 0
+        rows = await repo.card_items("39666")
+        assert len(rows) == 1
+
+    async def test_new_arrival_creates_a_new_row(self) -> None:
+        """Yangi partiya kelsa — bu yangi qaror, alohida qator."""
+        await repo.insert_candidates([make_candidate()])
+        yangi = await repo.insert_candidates([
+            make_candidate(arrived_date=TODAY, detected_date=TODAY + timedelta(days=1))
+        ])
+        assert yangi == 1
+        assert len(await repo.card_items("39666")) == 2
+
+    async def test_pending_statistics_are_refreshed(self) -> None:
+        """Javob berilmagan bandning sotuvi o'sib borishi kerak."""
+        await repo.insert_candidates([make_candidate(sold_qty=3, percent=60.0)])
+        await repo.insert_candidates([make_candidate(sold_qty=5, percent=100.0)])
+        row = (await repo.card_items("39666"))[0]
+        assert (row["sold_qty"], row["percent"]) == (5, 100.0)
+        # birinchi ko'rsatilgan kun saqlanadi — kartadagi yosh shundan hisoblanadi
+        assert row["detected_date"] == TODAY.isoformat()
+
+    async def test_answered_statistics_are_frozen(self) -> None:
+        """Javob berilgan band tegilmaydi — hisobot qaror paytidagi raqamni saqlaydi."""
+        await repo.insert_candidates([make_candidate(sold_qty=3, percent=60.0)])
+        rows = await repo.card_items("39666")
+        await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
+        await repo.insert_candidates([make_candidate(sold_qty=5, percent=100.0)])
+        row = (await repo.card_items("39666"))[0]
+        assert row["status"] == STATUS_TAKEN
+        assert (row["sold_qty"], row["percent"]) == (3, 60.0)
 
     async def test_empty_list(self) -> None:
         assert await repo.insert_candidates([]) == 0
@@ -249,11 +286,23 @@ class TestAnnounce:
 
 class TestExport:
     async def test_only_answered_rows(self) -> None:
+        """Export JAVOB BERILGAN kun bo'yicha — aniqlangan kun bo'yicha emas."""
         await repo.insert_candidates([
             make_candidate(sku="1"), make_candidate(sku="2"), make_candidate(sku="3"),
         ])
         for sku, status in (("1", STATUS_TAKEN), ("2", STATUS_NOT_FOUND)):
-            rows = await repo.card_items(sku, TODAY)
+            rows = await repo.card_items(sku)
             await repo.answer_candidate(rows[0]["id"], status=status, user_id=1)
-        exported = await repo.answered_for_export(TODAY)
+        # javob hozir yozildi, ya'ni bugungi hisobotga tushadi
+        exported = await repo.answered_for_export(date.today())
         assert {r["sku"] for r in exported} == {"1", "2"}
+
+    async def test_detection_day_does_not_decide_the_report(self) -> None:
+        """Eski bandga bugun javob berilsa — u BUGUNGI hisobotga tushadi."""
+        await repo.insert_candidates([
+            make_candidate(sku="eski", detected_date=TODAY - timedelta(days=4))
+        ])
+        rows = await repo.card_items("eski")
+        await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
+        exported = await repo.answered_for_export(date.today())
+        assert [r["sku"] for r in exported] == ["eski"]

@@ -7,6 +7,7 @@ belgisi deb o'qib xato beradi. Barcha dinamik matn esc() dan o'tadi.
 
 from __future__ import annotations
 
+from datetime import date
 from html import escape
 from typing import Any
 
@@ -35,11 +36,37 @@ def money(uzs: int) -> str:
     return f"{uzs:,}".replace(",", " ") + " so'm"
 
 
-def card_caption(rows: list[Any]) -> str:
+def age_label(detected: str, today: date, stale_after_days: int = 0) -> str:
+    """Band necha kun oldin aniqlangani.
+
+    Nega kerak: javob berilmagan band menyuda turaveradi — ertaga ham, bir
+    hafta keyin ham. Menejer uning ESKILIGINI ko'rib turishi kerak, chunki
+    eski band endi dolzarb bo'lmasligi mumkin (tovar boshqa yo'l bilan
+    to'ldirilgan bo'lishi mumkin).
+
+    Bugungi band uchun bo'sh satr — yangi bandga "bugun" deb yozish shovqin.
+    """
+    try:
+        days = (today - date.fromisoformat(str(detected))).days
+    except (TypeError, ValueError):
+        return ""
+    if days <= 0:
+        return ""
+    text = "kecha" if days == 1 else f"{days} kun oldin"
+    # Oynadan chiqqan band endi qayta aniqlanmaydi — buni ajratib ko'rsatamiz
+    if stale_after_days and days > stale_after_days:
+        return f"⚠️ {text}"
+    return text
+
+
+def card_caption(
+    rows: list[Any], *, today: date | None = None, stale_after_days: int = 0
+) -> str:
     """Artikul kartasi: tovar sarlavhasi + har bir filial/rang qatori.
 
     rows — bitta artikulning barcha (filial, rang) bandlari.
     """
+    today = today or date.today()
     if not rows:
         return "Band topilmadi."
 
@@ -61,10 +88,14 @@ def card_caption(rows: list[Any]) -> str:
         color = f" · {esc(row['color'])}" if row["color"] else ""
         percent = f"{row['percent']:g}"
         lines.append(f"{icon} <b>{shop}</b>{color} — <b>{row['recommended_qty']} dona</b>")
-        lines.append(
-            f"    <i>{row['base_qty']} kelgan, {row['sold_qty']} sotilgan "
-            f"({percent}%) · {esc(row['grade'])}</i>"
+        stats = (
+            f"{row['base_qty']} kelgan, {row['sold_qty']} sotilgan "
+            f"({percent}%) · {esc(row['grade'])}"
         )
+        age = age_label(row["detected_date"], today, stale_after_days)
+        if age:
+            stats += f" · {age}"
+        lines.append(f"    <i>{stats}</i>")
         if row["status"] != STATUS_PENDING:
             lines.append(f"    → <b>{esc(STATUS_LABEL[row['status']])}</b>")
         if row["transfer_hint"]:

@@ -66,6 +66,22 @@ days_to_50   = kunlik sotuvlar 50% ga yetgan birinchi kun (0 = kelgan kuni)
 **Nomzod** ⇔ `base_qty ≥ MIN_BASE_QTY (5)` **VA** `o'tgan kun ≤ WINDOW_DAYS (5)`
 **VA** `percent ≥ 50%` **VA** kategoriya `ALLOWED_CATEGORY_GROUPS` ichida.
 
+Kuzatiladigan kategoriyalar (skladdan filiallarga kelgan hajm, 30 kun):
+
+| Kategoriya | Ulush | Kuzatiladi |
+|---|---|---|
+| Плечевые одежды | 28.7% | ✅ |
+| Нижнее белье | 24.4% | ✅ |
+| Поясные одежды | 23.5% | ✅ |
+| Обувь | 10.0% | ✅ |
+| Верхняя одежда | 7.7% | ✅ |
+| Кроссовки | 2.4% | ✅ |
+| Аксессуары | 3.3% | ❌ |
+
+Ya'ni skladdan kelgan tovarning **~97%** i qamrab olinadi. Qolgan
+kategoriyalar (parfyumeriya, kosmetika, bijuteriya, paket, atelye va h.k.)
+POVTOR jarayoniga kirmaydi.
+
 `MIN_BASE_QTY` nima uchun kerak: skladdan 1-2 donalik "to'ldirish" transferlari
 juda ko'p keladi va ularda "100% sotildi" statistik ma'noga ega emas. Namuna
 POVTOR faylida Asos hech qachon 5 dan kichik emas (128 qatordan 74 tasi aynan 5).
@@ -187,9 +203,65 @@ Yana ikkita muhim nuqta:
 transfer va sotuv qatorlari `product_variant` jadvali orqali rangga
 bog'lanadi (`product_id` → `Цвет`).
 
-**Filiallar bir-biriga ham tovar yuboradi** (real ma'lumotda ~10%). Ular
-"yangi partiya keldi" hisoblanmaydi — shuning uchun `from_shop_id` majburiy
-tarzda SKLAD bilan solishtiriladi.
+**Filiallar bir-biriga ham tovar yuboradi** — real ma'lumotda 30 kunlik
+o'lchovda filiallarga kelgan transferlarning **~30%** i boshqa filialdan. Bu
+sotilmay qolgan tovarni qayta taqsimlash, ya'ni qayta buyurtmaga asos emas
+(aksincha — tovar boshqa joyda sotilmagan). Shuning uchun `from_shop_id`
+majburiy tarzda `WAREHOUSE_SHOP_IDS` ro'yxati bilan solishtiriladi.
+
+Bu qoida biznes tomonidan tasdiqlangan: *"filialdan filialga transfer qilingan
+tovar tez sotilsa ham bozordan olinmaydi — faqat skladdan kelgani"*.
+
+Manba taqsimoti (30 kun, filiallarga kelgan 20 522 qator):
+
+| Yuboruvchi | Ulush |
+|---|---|
+| `СКЛАД ПРИХОДА` (import) | 56.8% |
+| `BUTTON СКЛАД MEN` (sezon) | 12.9% |
+| filiallardan | ~30% |
+
+### Hisobotlar KUN-KUN so'raladi
+
+Billz hisobotlari **yangisidan eskisiga** tartiblangan va **tirik**: do'kon
+ishlayotgan paytda har yangi yozuv ro'yxat boshiga qo'shilib, sahifa
+chegaralarini suradi. Bir xil so'rov turli javob qaytaradi.
+
+O'lchov (`page=2` ni ketma-ket 3 marta):
+
+```
+1-so'rov: 1000 qator
+2-so'rov: -4 / +4     <- boshqa qatorlar
+3-so'rov: -7 / +7
+```
+
+Natijada ba'zi qatorlar ikki marta tushardi, ba'zilari **umuman tushmasdi** —
+nomzodlar soni har tekshiruvda 92..96 orasida sakrardi.
+
+O'tgan kunlar esa o'zgarmaydi, shuning uchun har kun **alohida** so'raladi.
+Faqat bugungi kun tirik, va u bitta sahifaga sig'adi.
+
+Natija (uch marta ketma-ket): `99, 99, 99` — farq `-0/+0`.
+
+⚠️ **Sotuv hisoboti DEDUPE QILINMAYDI.** Billz bir (kun, filial, tovar) uchun
+bir nechta qator qaytaradi — har xil narx/chegirma bo'yicha, va ularning har
+biri alohida haqiqiy sotuv (bir artikulda 11 tagacha qator kuzatilgan).
+`(date, shop_id, product_id)` bo'yicha birlashtirish sotuvning **16%** ini
+yo'q qiladi. Transfer uchun esa `(transfer_id, product_id)` xavfsiz —
+tekshirilgan, takror yo'q.
+
+### Tezlik
+
+Billz hisobot dvigateli bitta sahifani ~3 sekund hisoblaydi, va bu vaqt
+**qator soniga bog'liq emas** (o'lchov: 500 qator 4.2s, 2000 qator 3.3s).
+Shundan uchta qaror kelib chiqadi:
+
+| Sozlama | Nima qiladi |
+|---|---|
+| `BILLZ_PAGE_LIMIT=1000` | Katta sahifa deyarli bepul — so'rovlar soni yarmiga tushadi |
+| `BILLZ_CONCURRENCY=4` | Sahifalar guruh-guruh so'raladi. Tezlik chegarasini **oshirmaydi** (token-bucket baribir 1.5 rps da ushlab turadi) — faqat Billz javobini kutish vaqtlari ustma-ust tushadi. Aks holda bot 0.3 rps da ishlaydi, Billz ruxsat bergan 2 dan olti barobar kam |
+| `STOCK_REFRESH_HOURS=6` | Qoldiq hisoboti sahifalarning ~57% i, lekin faqat "boshqa filialda bormi?" uchun kerak — bir necha soatlik eskilik zarar qilmaydi |
+
+Natija (kunlik run, katalog keshda): **208s → 69s**.
 
 ### Katalog to'liq tortilmaydi
 
