@@ -9,7 +9,7 @@ botni ishlamas holga keltira oladi.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from aiogram import Bot
@@ -300,7 +300,8 @@ class TestExportCommand:
         await dispatcher.feed_update(bot, command_update("/export"))
         assert "SendDocument" in bot.method_names
         document = next(p for n, p in bot.sent if n == "SendDocument")
-        assert document["document"].filename == "POVTOR_2026-08-20.xlsx"
+        # fayl nomi hisobot sanasi bo'yicha — javob bugun berildi
+        assert document["document"].filename == f"POVTOR_{date.today().isoformat()}.xlsx"
         await bot.session.close()
 
     async def test_nothing_answered_says_so(self) -> None:
