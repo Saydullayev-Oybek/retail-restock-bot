@@ -36,27 +36,40 @@ def money(uzs: int) -> str:
     return f"{uzs:,}".replace(",", " ") + " so'm"
 
 
-def age_label(detected: str, today: date, stale_after_days: int = 0) -> str:
-    """Band necha kun oldin aniqlangani.
+def age_label(
+    detected: str, today: date, stale_after_days: int = 0, arrived: str = ""
+) -> str:
+    """Bandning yoshi va statistikasi eskirgani.
 
-    Nega kerak: javob berilmagan band menyuda turaveradi — ertaga ham, bir
-    hafta keyin ham. Menejer uning ESKILIGINI ko'rib turishi kerak, chunki
-    eski band endi dolzarb bo'lmasligi mumkin (tovar boshqa yo'l bilan
-    to'ldirilgan bo'lishi mumkin).
+    Ikki xil "yosh" bor va ular BOSHQA narsani bildiradi:
 
-    Bugungi band uchun bo'sh satr — yangi bandga "bugun" deb yozish shovqin.
+    * `detected` — band qachon ro'yxatga tushgani. Menejerga "bu qachondan
+      beri kutyapti" degan ma'noni beradi.
+    * `arrived`  — partiya qachon kelgani. Agar u oynadan chiqqan bo'lsa,
+      band /tekshir da endi QAYTA ANIQLANMAYDI va uning raqamlari
+      (sotilgan, foiz) o'sha kunda MUZLAB qolgan.
+
+    Ogohlantirish `arrived` bo'yicha qo'yiladi: aynan shunda raqamlar
+    eskiradi. Band kecha aniqlangan bo'lishi, lekin partiyasi bir hafta
+    oldin kelgan bo'lishi mumkin — bunday holatda "kecha" degan yozuv
+    menejerni chalg'itadi.
     """
     try:
         days = (today - date.fromisoformat(str(detected))).days
     except (TypeError, ValueError):
         return ""
+
+    eskirgan = False
+    if stale_after_days and arrived:
+        try:
+            eskirgan = (today - date.fromisoformat(str(arrived))).days > stale_after_days
+        except (TypeError, ValueError):
+            eskirgan = False
+
     if days <= 0:
-        return ""
+        return "⚠️ eskirgan" if eskirgan else ""
     text = "kecha" if days == 1 else f"{days} kun oldin"
-    # Oynadan chiqqan band endi qayta aniqlanmaydi — buni ajratib ko'rsatamiz
-    if stale_after_days and days > stale_after_days:
-        return f"⚠️ {text}"
-    return text
+    return f"⚠️ {text} · eskirgan" if eskirgan else text
 
 
 def card_caption(
@@ -100,7 +113,9 @@ def card_caption(
             f"{row['base_qty']} kelgan, {row['sold_qty']} sotilgan "
             f"({percent}%) · {esc(row['grade'])}"
         )
-        age = age_label(row["detected_date"], today, stale_after_days)
+        age = age_label(
+            row["detected_date"], today, stale_after_days, row["arrived_date"]
+        )
         if age:
             stats += f" · {age}"
         lines.append(f"    <i>{stats}</i>")

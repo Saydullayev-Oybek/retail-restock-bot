@@ -6,7 +6,7 @@ belgilar uchrasa Telegram butun xabarni rad etadi va karta umuman ochilmaydi.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -20,6 +20,7 @@ TODAY = date(2026, 8, 27)
 def row(**overrides) -> dict:
     base = {
         "detected_date": TODAY.isoformat(),
+        "arrived_date": (TODAY - timedelta(days=2)).isoformat(),
         "sku": "39666", "color": "Белый", "shop_name": "ANDALUS",
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
@@ -162,18 +163,39 @@ class TestAgeLabel:
     def test_label(self, detected: str, expected: str) -> None:
         assert texts.age_label(detected, TODAY) == expected
 
-    def test_stale_items_are_flagged(self) -> None:
-        """Oynadan chiqqan band ajratib ko'rsatiladi — u endi qayta aniqlanmaydi."""
-        assert texts.age_label("2026-08-22", TODAY, stale_after_days=5) == "5 kun oldin"
-        assert texts.age_label("2026-08-21", TODAY, stale_after_days=5) == "⚠️ 6 kun oldin"
+    def test_stale_is_decided_by_ARRIVAL_not_detection(self) -> None:
+        """Statistika partiya oynadan chiqqanda muzlaydi, aniqlangan kunda emas.
+
+        Band KECHA aniqlangan bo'lishi, lekin partiyasi bir hafta oldin
+        kelgan bo'lishi mumkin — uning raqamlari allaqachon eskirgan.
+        Real holat: 104 banddan 82 tasi aynan shunday edi.
+        """
+        # kecha aniqlangan, lekin partiya 6 kunlik -> ESKIRGAN
+        assert texts.age_label(
+            "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-21"
+        ) == "⚠️ kecha · eskirgan"
+        # kecha aniqlangan, partiya 2 kunlik -> toza
+        assert texts.age_label(
+            "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-25"
+        ) == "kecha"
+
+    def test_today_but_stale_still_warns(self) -> None:
+        assert texts.age_label(
+            "2026-08-27", TODAY, stale_after_days=5, arrived="2026-08-20"
+        ) == "⚠️ eskirgan"
 
     def test_no_flag_without_threshold(self) -> None:
         assert texts.age_label("2026-08-01", TODAY) == "26 kun oldin"
+        assert texts.age_label("2026-08-01", TODAY, arrived="2026-01-01") == "26 kun oldin"
 
     def test_future_or_broken_date(self) -> None:
         assert texts.age_label("2026-09-01", TODAY) == ""
         assert texts.age_label("", TODAY) == ""
         assert texts.age_label("aniqmas", TODAY) == ""
+        # buzilgan arrived ogohlantirish bermaydi, lekin yiqilmaydi ham
+        assert texts.age_label(
+            "2026-08-25", TODAY, stale_after_days=5, arrived="aniqmas"
+        ) == "2 kun oldin"
 
     def test_card_shows_age_only_for_old_items(self) -> None:
         text = texts.card_caption([
@@ -186,7 +208,8 @@ class TestAgeLabel:
 
     def test_card_flags_stale_item(self) -> None:
         text = texts.card_caption(
-            [row(detected_date="2026-08-19")], today=TODAY, stale_after_days=5
+            [row(detected_date="2026-08-26", arrived_date="2026-08-19")],
+            today=TODAY, stale_after_days=5,
         )
-        assert "⚠️ 8 kun oldin" in text
+        assert "⚠️" in text and "eskirgan" in text
 
