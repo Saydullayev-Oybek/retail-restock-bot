@@ -18,19 +18,50 @@ from __future__ import annotations
 import atexit
 import fcntl
 import os
+import subprocess
 from pathlib import Path
+
+
+def _process_state(pid: str) -> str:
+    """Jarayonning holati (ps STAT ustuni). Aniqlab bo'lmasa bo'sh satr."""
+    if not pid.isdigit():
+        return ""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=", "-p", pid],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
 
 
 class AlreadyRunning(RuntimeError):
     """Boshqa nusxa allaqachon ishlayapti."""
 
     def __init__(self, pid: str, path: Path) -> None:
-        super().__init__(
-            f"Bot allaqachon ishlayapti (PID {pid}). "
-            f"Qulf: {path}\n"
-            f"To'xtatish: kill {pid}   yoki   pkill -f povtor_bot.main"
-        )
+        state = _process_state(pid)
+        lines = [f"Bot allaqachon ishlayapti (PID {pid}). Qulf: {path}"]
+
+        # Ctrl+Z bosilgan jarayon xotirada qoladi va qulfni USHLAB TURADI,
+        # lekin hech nima qilmaydi — Telegram'dan xabar olmaydi. Tashqaridan
+        # bu "bot ishlayapti, lekin javob bermayapti" bo'lib ko'rinadi va
+        # sababini topish qiyin.
+        if state.startswith("T"):
+            lines += [
+                "",
+                "⚠️  Lekin u TO'XTATILGAN holatda (Ctrl+Z bosilgan).",
+                "    Qulfni ushlab turibdi, ammo ishlamayapti.",
+                "",
+                f"    Davom ettirish : fg   yoki   kill -CONT {pid}",
+                f"    Butunlay yopish: kill {pid}",
+            ]
+        else:
+            lines += ["", f"To'xtatish: kill {pid}   yoki   pkill -f povtor_bot.main"]
+
+        super().__init__("\n".join(lines))
         self.pid = pid
+        self.state = state
 
 
 def acquire(lock_path: str) -> None:

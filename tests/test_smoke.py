@@ -230,3 +230,34 @@ class TestBackup:
             await conn.close()
         assert not eski.exists()
         assert yangi.exists()
+
+
+class TestSuspendedProcessHint:
+    """Ctrl+Z bosilgan bot qulfni ushlab turadi, lekin ishlamaydi.
+
+    Tashqaridan bu "bot ishlayapti, lekin javob bermayapti" bo'lib ko'rinadi
+    va sababini topish qiyin — real holatda aynan shunday bo'lgan.
+    """
+
+    def test_stopped_process_is_explained(self, monkeypatch, tmp_path) -> None:
+        from povtor_bot import singleton
+
+        monkeypatch.setattr(singleton, "_process_state", lambda pid: "T")
+        exc = singleton.AlreadyRunning("123", tmp_path / "x.lock")
+        matn = str(exc)
+        assert "TO'XTATILGAN" in matn and "Ctrl+Z" in matn
+        assert "kill -CONT 123" in matn      # davom ettirish yo'li
+
+    def test_running_process_gets_the_plain_hint(self, monkeypatch, tmp_path) -> None:
+        from povtor_bot import singleton
+
+        monkeypatch.setattr(singleton, "_process_state", lambda pid: "S+")
+        matn = str(singleton.AlreadyRunning("123", tmp_path / "x.lock"))
+        assert "TO'XTATILGAN" not in matn
+        assert "kill 123" in matn
+
+    def test_unknown_state_does_not_break(self, monkeypatch, tmp_path) -> None:
+        from povtor_bot import singleton
+
+        monkeypatch.setattr(singleton, "_process_state", lambda pid: "")
+        assert "kill 123" in str(singleton.AlreadyRunning("123", tmp_path / "x.lock"))
