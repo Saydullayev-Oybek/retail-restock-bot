@@ -102,21 +102,39 @@ partiyadan ko'p chiqadi (5 keldi, 6 sotildi). Bunday holatda partiya to'g'ri
 maxraj emas — namuna faylda ham foiz hech qachon 100 dan oshmagan. "Sotilgan"
 ustunida esa haqiqiy raqam saqlanadi.
 
-**Daraja:**
+**Daraja** — texnik topshiriqdagi qoida (`GRADE_RULE=speed`, sukut):
 
-| Shart | Daraja | Tavsiya |
+> *"Qancha tezroq 50%ga yetgan bo'lsa, shuncha ishonchli. 2 kun ichida yetsa —
+> yuqori tavsiya miqdori, 3-5 kun ichida — o'rtacha."*
+
+| 50%ga yetgan kun | Daraja | Tavsiya |
 |---|---|---|
-| `sold_qty ≥ 4` **VA** (`percent ≥ 80` **YOKI** `days_to_50 ≤ 3`) | `ishonchli` | **10 dona** |
-| qolgan hamma holat | `oddiy` | **5 dona** |
+| 0–2 | `ishonchli` | **10 dona** |
+| 3–5 | `oddiy` | **5 dona** |
 
-> Bu qoida hozirgi qo'lda ishlaydigan jarayondan olingan **128 qatorli haqiqiy
-> POVTOR faylining hammasiga** mos keladi (`tests/fixtures/golden_rules.json`),
-> va `tests/test_rules.py` uni har ishga tushirishda qayta tekshiradi.
+### Ikkinchi rejim: `GRADE_RULE=speed_and_volume`
 
-`sold_qty ≥ 4` shartining sababi: kichik partiyada tasodif ulushi katta —
-5 tadan 3 tasi 3 kunda sotilishi 11 tadan 7 tasi 3 kunda sotilishi bilan bir xil
-ishonch bermaydi. Agar 100% sotilgan kichik partiya ham "ishonchli" bo'lishini
-xohlasangiz, `.env` da `HIGH_PERCENT_OVERRIDES_MIN_SOLD=true` qiling.
+Namuna POVTOR faylidan teskari muhandislik qilingan variant:
+
+```
+ishonchli ⇔ sotilgan ≥ 4 VA (foiz ≥ 80 YOKI 50%ga ≤ 3 kunda)
+```
+
+U namuna fayldagi **128 qatorning hammasiga** mos keladi
+(`tests/fixtures/golden_rules.json`), texnik topshiriq qoidasi esa
+**28 qatorda farq qiladi** — chunki amaldagi qo'lda ishlaydigan jarayon
+tezlikdan tashqari **hajmni** ham hisobga olar ekan:
+
+```
+asos=6  sotilgan=6  foiz=100%  50%ga 3-kunda  →  Excel: ishonchli
+asos=5  sotilgan=4  foiz=80%   50%ga 4-kunda  →  Excel: ishonchli
+```
+
+Topshiriqda `masalan` deb yozilgani uchun u misol, aniq formula emas.
+**Loyiha egasi texnik topshiriqni asos qilib tanladi.**
+
+Real ma'lumotda farq: 105 banddan 36 tasi darajasini o'zgartiradi, umumiy
+tavsiya miqdori −5% (745 → 715 dona).
 
 Barcha raqamlar `.env` orqali sozlanadi.
 
