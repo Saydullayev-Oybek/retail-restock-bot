@@ -97,6 +97,15 @@ def age_label(
     return "kecha" if days == 1 else f"{days} kun oldin"
 
 
+def _row_window(row: Any, fallback: int) -> int:
+    """Bandni topgan oyna. Eski qatorlarda ustun bo'lmasligi mumkin."""
+    try:
+        value = row["window_days"]
+    except (KeyError, IndexError, TypeError):
+        return fallback
+    return int(value) if value else fallback
+
+
 def card_caption(
     rows: list[Any], *, today: date | None = None, stale_after_days: int = 0,
     visible: list[Any] | None = None, page: int = 0, pages: int = 1,
@@ -148,9 +157,10 @@ def card_caption(
 
         # 2-qator: daraja, 50% ga yetish tezligi va eskirish belgisi
         detal = [esc(row["grade"]), f"50%ga {row['days_to_50']}-kunda"]
-        age = age_label(
-            row["detected_date"], today, stale_after_days, row["arrived_date"]
-        )
+        # Har band O'Z oynasi bilan solishtiriladi: menejer 10 kunlik
+        # tekshiruv qilgan bo'lsa, 7 kunlik band eskirgan emas
+        oyna = _row_window(row, stale_after_days)
+        age = age_label(row["detected_date"], today, oyna, row["arrived_date"])
         if age:
             detal.append(age)
         lines.append(f"    <i>{' · '.join(detal)}</i>")
@@ -192,7 +202,7 @@ def transfer_hint_text(rows: list[Any]) -> str:
     return "Transfer qilsa bo'ladi — " + ", ".join(parts)
 
 
-def check_report(result: Any) -> str:
+def check_report(result: Any, *, days: int = 0, percent: int = 0) -> str:
     if not result.ok:
         return f"⚠️ Tekshiruv bajarilmadi.\n<code>{esc(result.error)}</code>"
     lines = [
@@ -201,6 +211,10 @@ def check_report(result: Any) -> str:
         f"Yangi qo'shildi: <b>{result.new_count}</b>",
         f"Qoldiq qatorlari: {result.stock_rows}",
     ]
+    if days and percent:
+        # Menejer natijani QAYSI qoida bilan olganini eslay olishi kerak —
+        # u har tekshiruvda boshqacha bo'lishi mumkin
+        lines.append(f"<i>oyna {days} kun · chegara {percent}%</i>")
     if result.usd_rate:
         lines.append(f"USD kursi: {result.usd_rate:g}")
     yopildi = getattr(result, "superseded", 0)

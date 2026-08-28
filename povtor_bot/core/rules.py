@@ -317,6 +317,7 @@ def detect_candidates(
                 supply_price=supply_price,
                 supply_currency=supply_currency,
                 price_uzs=to_uzs(supply_price, supply_currency, usd_rate),
+                window_days=cfg.window_days,
             )
         )
 

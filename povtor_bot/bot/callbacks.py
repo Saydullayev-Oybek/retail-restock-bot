@@ -14,6 +14,17 @@ from __future__ import annotations
 from aiogram.filters.callback_data import CallbackData
 
 
+class CheckCB(CallbackData, prefix="chk"):
+    """Tekshiruv parametrlari.
+
+    Ikki qadamli tanlov holati shu yerda olib yuriladi — FSM kerak emas:
+    `percent == 0` hali tanlanmagan degani (1-qadam, kun tanlandi).
+    """
+
+    days: int
+    percent: int = 0
+
+
 class CategoryCB(CallbackData, prefix="cat"):
     """1-daraja: kategoriya tanlandi."""
 

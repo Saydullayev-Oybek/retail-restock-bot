@@ -18,7 +18,7 @@ from aiogram.enums import ParseMode
 from aiogram.methods import TelegramMethod
 from aiogram.types import Chat, Message, Update, User
 
-from povtor_bot.bot.callbacks import AnswerCB, CategoryCB
+from povtor_bot.bot.callbacks import AnswerCB, CategoryCB, CheckCB
 from povtor_bot.config import Settings
 from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_TAKEN
 from povtor_bot.db import repo
@@ -138,33 +138,115 @@ class TestAccess:
 
 
 class TestCheckCommand:
-    async def test_check_pulls_and_reports(self, monkeypatch) -> None:
-        """/tekshir Billz'ga boradi, hisoblaydi va natijani xabar qilib qaytaradi."""
-        gateway = FakeGateway(
-            transfers=[
-                a_transfer("shop1", "39666", "Белый", TODAY - timedelta(days=2), 5),
-            ],
-            sales=[
-                a_sale("shop1", "39666", "Белый", TODAY - timedelta(days=1), 5),
-            ],
+    """`/tekshir` endi qoidani SO'RAYDI.
+
+    Menejer har tekshiruvda oynani va chegarani o'zi tanlaydi — "bugungi tez
+    ketganlar" uchun 3 kun / 60%, "hamma to'planganlar" uchun 14 kun / 50%.
+    """
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            transfers=[a_transfer("shop1", "39666", "Белый",
+                                  TODAY - timedelta(days=2), 5)],
+            sales=[a_sale("shop1", "39666", "Белый", TODAY - timedelta(days=1), 5)],
             products=[a_product()],
         )
-        bot = RecordingBot()
-        dispatcher = build_dispatcher(gateway, settings_for())
 
-        # Handler `today` ni bermaydi (date.today() ishlatiladi) — testda sanani
-        # qotirish uchun run_check vaqtincha almashtiriladi
+    def _pin_today(self, monkeypatch):
         original = check_service.run_check
         monkeypatch.setattr(
             check_service, "run_check",
             lambda gw, st, *, today=None: original(gw, st, today=TODAY),
         )
+
+    async def test_bare_command_asks_for_the_window(self) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
         await dispatcher.feed_update(bot, command_update("/tekshir"))
 
-        assert "shops" in gateway.calls and "transfers" in gateway.calls
-        assert bot.method_names == ["SendMessage", "EditMessageText"]
-        assert "Tekshiruv tugadi" in bot.texts_of("EditMessageText")[0]
-        assert await repo.open_count(TODAY) == 1
+        name, payload = bot.sent[0]
+        assert name == "SendMessage"
+        assert "Necha kunlik" in payload["text"]
+        labels = [b["text"] for r in payload["reply_markup"]["inline_keyboard"] for b in r]
+        assert "• 5 kun" in labels        # .env dagi sukut belgilangan
+        assert "14 kun" in labels
+        await bot.session.close()
+
+    async def test_choosing_days_asks_for_the_percent(self) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
+        await dispatcher.feed_update(bot, callback_update(CheckCB(days=7).pack()))
+
+        edited = next(p for n, p in bot.sent if n == "EditMessageText")
+        assert "chegarasi" in edited["text"] and "7 kun" in edited["text"]
+        labels = [b["text"] for r in edited["reply_markup"]["inline_keyboard"] for b in r]
+        assert "• 50%" in labels and "80%" in labels
+        await bot.session.close()
+
+    async def test_choosing_percent_runs_with_those_values(self, monkeypatch) -> None:
+        gateway = self._gateway()
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(gateway, settings_for())
+        self._pin_today(monkeypatch)
+
+        await dispatcher.feed_update(
+            bot, callback_update(CheckCB(days=7, percent=60).pack())
+        )
+        matnlar = " ".join(bot.texts_of("EditMessageText"))
+        assert "oyna 7 kun · chegara 60%" in matnlar
+        assert "Tekshiruv tugadi" in matnlar
+        await bot.session.close()
+
+    async def test_arguments_skip_the_questions(self, monkeypatch) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(self._gateway(), settings_for())
+        self._pin_today(monkeypatch)
+
+        await dispatcher.feed_update(bot, command_update("/tekshir 7 60"))
+        assert "reply_markup" not in bot.sent[0][1]      # tugmalar so'ralmadi
+        assert "oyna 7 kun · chegara 60%" in " ".join(bot.texts_of("SendMessage"))
+        await bot.session.close()
+
+    async def test_days_only_uses_the_default_percent(self, monkeypatch) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(self._gateway(), settings_for())
+        self._pin_today(monkeypatch)
+
+        await dispatcher.feed_update(bot, command_update("/tekshir 7"))
+        assert "oyna 7 kun · chegara 50%" in " ".join(bot.texts_of("SendMessage"))
+        await bot.session.close()
+
+    @pytest.mark.parametrize("arg, kutilgan", [
+        ("abc", "raqam bo'lishi"),
+        ("0", "1 dan"),
+        ("999", "1 dan"),
+        ("7 0", "Foiz"),
+        ("7 500", "Foiz"),
+        ("7 60 80", "Ko'p argument"),
+    ])
+    async def test_bad_arguments_explain_and_offer_buttons(
+        self, arg: str, kutilgan: str
+    ) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
+        await dispatcher.feed_update(bot, command_update(f"/tekshir {arg}"))
+
+        matn = bot.texts_of("SendMessage")[0]
+        assert kutilgan in matn
+        # xato bo'lsa ham tanlov taklif qilinadi
+        assert "reply_markup" in bot.sent[0][1]
+        await bot.session.close()
+
+    async def test_busy_check_is_reported_before_asking(self, monkeypatch) -> None:
+        """Tanlov so'rab, keyin "band" deyish menejerni bezovta qiladi."""
+        monkeypatch.setattr(check_service, "is_running", lambda: True)
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
+        await dispatcher.feed_update(bot, command_update("/tekshir"))
+
+        matn = bot.texts_of("SendMessage")[0]
+        assert "allaqachon ketyapti" in matn
+        assert "reply_markup" not in bot.sent[0][1]
         await bot.session.close()
 
 

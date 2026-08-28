@@ -120,6 +120,8 @@ class Candidate:
     supply_price: float = 0.0
     supply_currency: str = "UZS"
     price_uzs: int = 0
+    # Qaysi oyna bilan topilgani — kartadagi "eskirgan" belgisi shunga qaraydi
+    window_days: int = 5
 
 
 # Statuslar — bitta joyda, magic string tarqalmasin

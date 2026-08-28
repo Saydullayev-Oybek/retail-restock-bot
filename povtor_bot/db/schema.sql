@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS candidate (
     recommended_qty   INTEGER NOT NULL,
     note              TEXT    NOT NULL DEFAULT '',  -- Izoh matni
     arrived_date      TEXT    NOT NULL,             -- skladdan kelgan sana
+    -- Band QAYSI OYNA bilan topilgani. Menejer /tekshir da oynani o'zgartira
+    -- oladi, shuning uchun "eskirgan" belgisi umumiy sozlamaga emas, aynan
+    -- shu bandni topgan oynaga solishtiriladi.
+    window_days       INTEGER NOT NULL DEFAULT 5,
 
     status            TEXT    NOT NULL DEFAULT 'pending'
                               CHECK (status IN ('pending', 'taken', 'not_found')),

@@ -271,7 +271,7 @@ _CANDIDATE_COLUMNS = (
     "detected_date, shop_id, shop_name, category_group, subcategory, kind, product_name, "
     "sku, color, supplier, product_id, image_url, supply_price, supply_currency, "
     "price_uzs, base_qty, sold_qty, percent, days_to_50, grade, recommended_qty, "
-    "note, arrived_date"
+    "note, arrived_date, window_days"
 )
 
 
@@ -299,11 +299,11 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
             c.subcategory, c.kind, c.product_name, c.sku, c.color, c.supplier, c.product_id,
             c.image_url, c.supply_price, c.supply_currency, c.price_uzs, c.base_qty,
             c.sold_qty, c.percent, c.days_to_50, c.grade, c.recommended_qty,
-            c.note, c.arrived_date.isoformat(),
+            c.note, c.arrived_date.isoformat(), c.window_days,
         )
         for c in candidates
     ]
-    placeholders = ", ".join(["?"] * 23)
+    placeholders = ", ".join(["?"] * 24)
     async with write_lock():
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         before = (await cursor.fetchone())["n"]

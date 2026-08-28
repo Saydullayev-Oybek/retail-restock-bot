@@ -51,7 +51,7 @@ davrida 10 ta jarayon bir vaqtda ishlab qolgan edi.
 
 | Buyruq | Ish |
 |---|---|
-| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi |
+| `/tekshir` | Qoidani so'raydi (oyna va chegara), keyin Billz'dan tortib nomzodlarni hisoblaydi |
 | `/buyurtma` | Kaskadli menyu: kategoriya → ta'minotchi → artikul → karta |
 | `/yangi` | Yangi kelgan tovarlarni umumiy guruhga e'lon qiladi |
 | `/export` | Kunning javoblarini Excel'ga chiqaradi (har filialga alohida varaq) |
@@ -61,6 +61,34 @@ Bundan tashqari bot **har kuni `SCHEDULE_TIME` da** (default 09:00,
 xabar qiladi.
 
 ---
+
+## `/tekshir` — qoidani menejer tanlaydi
+
+```
+/tekshir
+   ↓
+📅 Necha kunlik oyna?     [3] [• 5] [7] [10] [14]
+   ↓
+📊 Sotuv chegarasi?       [40%] [• 50%] [60%] [70%] [80%]
+   ↓
+✅ Tekshiruv tugadi
+   oyna 7 kun · chegara 60%
+```
+
+`•` — `.env` dagi sukut qiymat. Qisqa yo'l: `/tekshir 7` yoki `/tekshir 7 60`.
+
+Nega kerak: bir xil ma'lumotdan turli savollar chiqadi — *"bugun nima tez
+ketdi"* uchun `3 kun / 60%`, *"nimalar to'planib qoldi"* uchun `14 kun / 50%`.
+Ilgari buni o'zgartirish uchun `.env` ni tahrirlab botni qayta ishga tushirish
+kerak edi.
+
+Tanlangan qiymat **eslab qolinmaydi** — har tekshiruvda qaytadan so'raladi.
+Kunlik 09:00 tekshiruvi hech kimdan so'ray olmaydi, u `.env` qiymatlari
+bilan ishlaydi.
+
+Band **qaysi oyna bilan topilgani** o'z qatorida saqlanadi (`window_days`),
+shuning uchun 10 kunlik tekshiruvdan chiqqan 7 kunlik band `⚠️ eskirgan`
+deb belgilanmaydi.
 
 ## Nomzod aniqlash qoidasi
 

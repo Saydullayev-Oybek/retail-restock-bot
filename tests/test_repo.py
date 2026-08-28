@@ -386,3 +386,48 @@ class TestSupersedeByNewArrival:
         arrivals = [("shop1", "39666", "Белый", TODAY.isoformat())]
         assert await repo.supersede_by_new_arrivals(arrivals) == 1
         assert await repo.supersede_by_new_arrivals(arrivals) == 0
+
+
+class TestWindowDaysMigration:
+    """`window_days` ustuni mavjud bazalarga qo'shiladi."""
+
+    async def test_column_is_added_and_rows_survive(self, tmp_path) -> None:
+        import sqlite3
+
+        from povtor_bot.db import conn
+
+        # Ustunsiz "eski" baza yasaymiz
+        path = tmp_path / "eski.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.insert_candidates([make_candidate()])
+        await conn.close()
+
+        raw = sqlite3.connect(path)
+        raw.executescript("""
+            CREATE TABLE tmp AS SELECT * FROM candidate;
+            DROP TABLE candidate;
+            CREATE TABLE candidate AS SELECT * FROM tmp;
+            DROP TABLE tmp;
+        """)
+        raw.execute("ALTER TABLE candidate DROP COLUMN window_days")
+        raw.commit()
+        assert "window_days" not in {
+            r[1] for r in raw.execute("PRAGMA table_info(candidate)")
+        }
+        raw.close()
+
+        # Ulanish migratsiyani qo'llashi kerak
+        await conn.connect(str(path))
+        try:
+            async with conn.db().execute("PRAGMA table_info(candidate)") as cur:
+                cols = {r["name"] for r in await cur.fetchall()}
+            async with conn.db().execute(
+                "SELECT COUNT(*) AS n, MIN(window_days) AS w FROM candidate"
+            ) as cur:
+                row = await cur.fetchone()
+        finally:
+            await conn.close()
+
+        assert "window_days" in cols
+        assert row["n"] == 1 and row["w"] == 5     # sukut qiymat

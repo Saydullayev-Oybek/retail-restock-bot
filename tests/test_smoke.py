@@ -8,6 +8,8 @@ sig'adimi.
 from __future__ import annotations
 
 from povtor_bot.bot.callbacks import AnswerCB, CategoryCB, NavCB, SkuCB, SupplierCB
+import pytest
+
 from povtor_bot.db import conn
 
 
@@ -261,3 +263,40 @@ class TestSuspendedProcessHint:
 
         monkeypatch.setattr(singleton, "_process_state", lambda pid: "")
         assert "kill 123" in str(singleton.AlreadyRunning("123", tmp_path / "x.lock"))
+
+
+class TestCheckCallbackSize:
+    def test_fits_the_64_byte_limit(self) -> None:
+        from povtor_bot.bot.callbacks import CheckCB
+
+        for cb in (CheckCB(days=60), CheckCB(days=60, percent=100)):
+            assert len(cb.pack().encode("utf-8")) <= 64
+
+    def test_roundtrip(self) -> None:
+        from povtor_bot.bot.callbacks import CheckCB
+
+        original = CheckCB(days=7, percent=60)
+        assert CheckCB.unpack(original.pack()) == original
+
+
+class TestCheckArgs:
+    """`/tekshir 7 60` argumentlari."""
+
+    @pytest.mark.parametrize("raw, kutilgan", [
+        ("", (None, None)),
+        ("7", (7, None)),
+        ("7 60", (7, 60)),
+        ("  10   80  ", (10, 80)),
+    ])
+    def test_valid(self, raw: str, kutilgan: tuple) -> None:
+        from povtor_bot.bot.handlers.commands import parse_check_args
+
+        days, percent, error = parse_check_args(raw)
+        assert (days, percent) == kutilgan and error == ""
+
+    @pytest.mark.parametrize("raw", ["abc", "0", "-1", "61", "7 0", "7 101", "7 60 80"])
+    def test_invalid_returns_an_explanation(self, raw: str) -> None:
+        from povtor_bot.bot.handlers.commands import parse_check_args
+
+        days, percent, error = parse_check_args(raw)
+        assert days is None and percent is None and error

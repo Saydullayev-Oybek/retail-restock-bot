@@ -8,7 +8,50 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..core.models import STATUS_PENDING
-from .callbacks import AnswerCB, CategoryCB, NavCB, NoopCB, SkuCB, SupplierCB
+from .callbacks import (
+    AnswerCB,
+    CategoryCB,
+    CheckCB,
+    NavCB,
+    NoopCB,
+    SkuCB,
+    SupplierCB,
+)
+
+
+# /tekshir tanlovlari. Kunlik ishda tez-tez ishlatiladigan qiymatlar —
+# ro'yxatda yo'q qiymat kerak bo'lsa `/tekshir 6 55` deb yozish mumkin.
+DAY_CHOICES = (3, 5, 7, 10, 14)
+PERCENT_CHOICES = (40, 50, 60, 70, 80)
+
+
+def _mark(value: int, default: int) -> str:
+    """Sozlamadagi sukut qiymatni ajratib ko'rsatadi."""
+    return f"• {value}" if value == default else str(value)
+
+
+def check_days_kb(default_days: int) -> InlineKeyboardMarkup:
+    """1-qadam: oyna kengligi."""
+    builder = InlineKeyboardBuilder()
+    for days in DAY_CHOICES:
+        builder.button(
+            text=f"{_mark(days, default_days)} kun",
+            callback_data=CheckCB(days=days),
+        )
+    builder.adjust(3)
+    return builder.as_markup()
+
+
+def check_percent_kb(days: int, default_percent: int) -> InlineKeyboardMarkup:
+    """2-qadam: sotuv chegarasi. Tanlangan kun callback'da olib yuriladi."""
+    builder = InlineKeyboardBuilder()
+    for percent in PERCENT_CHOICES:
+        builder.button(
+            text=f"{_mark(percent, default_percent)}%",
+            callback_data=CheckCB(days=days, percent=percent),
+        )
+    builder.adjust(3)
+    return builder.as_markup()
 
 
 def categories_kb(rows: list[tuple[int, str, int]]) -> InlineKeyboardMarkup:

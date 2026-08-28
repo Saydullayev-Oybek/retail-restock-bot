@@ -25,7 +25,7 @@ def row(**overrides) -> dict:
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
-        "days_to_50": 2, "superseded_at": None,
+        "days_to_50": 2, "superseded_at": None, "window_days": 5,
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)
@@ -233,3 +233,50 @@ class TestAgeLabel:
         )
         assert "⚠️" in text and "eskirgan" in text
 
+
+
+class TestStaleUsesTheRowWindow:
+    """"Eskirgan" belgisi bandning O'Z oynasiga solishtiriladi.
+
+    Menejer 10 kunlik tekshiruv qilsa, 7 kunlik band eskirgan EMAS — u aynan
+    shu oyna uchun topilgan. Umumiy sozlamaga (5 kun) solishtirish uni
+    noto'g'ri belgilagan bo'lardi.
+    """
+
+    def test_wide_window_row_is_not_stale(self) -> None:
+        matn = texts.card_caption(
+            [row(arrived_date="2026-08-20", window_days=10)],
+            today=TODAY, stale_after_days=5,
+        )
+        assert "⚠️" not in matn
+
+    def test_narrow_window_row_is_stale(self) -> None:
+        matn = texts.card_caption(
+            [row(arrived_date="2026-08-20", window_days=3)],
+            today=TODAY, stale_after_days=5,
+        )
+        assert "⚠️ eskirgan" in matn
+
+    def test_missing_column_falls_back(self) -> None:
+        """Migratsiyadan oldingi qatorlarda ustun bo'lmasligi mumkin."""
+        eski = row(arrived_date="2026-08-20")
+        eski.pop("window_days", None)
+        assert "⚠️ eskirgan" in texts.card_caption(
+            [eski], today=TODAY, stale_after_days=5
+        )
+
+
+class TestReportShowsTheRule:
+    class Result:
+        def __init__(self, **kw) -> None:
+            self.__dict__.update(
+                {"ok": True, "total_found": 5, "new_count": 1, "stock_rows": 0,
+                 "usd_rate": 0.0, "error": ""} | kw
+            )
+
+    def test_rule_is_shown_when_given(self) -> None:
+        matn = texts.check_report(self.Result(), days=7, percent=60)
+        assert "oyna 7 kun · chegara 60%" in matn
+
+    def test_omitted_when_not_given(self) -> None:
+        assert "oyna" not in texts.check_report(self.Result())

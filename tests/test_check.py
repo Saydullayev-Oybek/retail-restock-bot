@@ -476,3 +476,57 @@ class TestSupersedeInCheck:
         assert result.total_found == 1
         assert await repo.open_count() == 1          # ikkitasi emas
         assert len(await repo.card_items("1")) == 2  # kartada ikkalasi ko'rinadi
+
+
+class TestWindowOverride:
+    """Menejer /tekshir da oyna va chegarani o'zgartira oladi.
+
+    run_check imzosi o'zgarmagan — u sozlamalarni Settings dan oladi,
+    shuning uchun o'zgartirilgan NUSXA uzatiladi.
+    """
+
+    def _gateway(self) -> FakeGateway:
+        # Turli kunlarda kelgan uch partiya
+        return FakeGateway(
+            transfers=[
+                a_transfer("shop1", "yangi", "Белый", TODAY - timedelta(days=2), 5),
+                a_transfer("shop1", "orta", "Белый", TODAY - timedelta(days=5), 5),
+                a_transfer("shop1", "eski", "Белый", TODAY - timedelta(days=8), 5),
+            ],
+            sales=[
+                a_sale("shop1", "yangi", "Белый", TODAY, 3),
+                a_sale("shop1", "orta", "Белый", TODAY, 3),
+                a_sale("shop1", "eski", "Белый", TODAY, 3),
+            ],
+            products=[a_product(sku=s) for s in ("yangi", "orta", "eski")],
+        )
+
+    async def test_wider_window_finds_more(self) -> None:
+        besh = make_settings(window_days=5)
+        assert (await check_service.run_check(
+            self._gateway(), besh, today=TODAY)).total_found == 2
+
+    async def test_ten_days_reaches_the_old_batch(self) -> None:
+        settings = make_settings(window_days=10)
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.total_found == 3
+        assert {r["sku"] for r in await repo.card_items("eski")} == {"eski"}
+
+    async def test_higher_threshold_finds_fewer(self) -> None:
+        # 5 dan 3 = 60%, ya'ni 70% chegara hech kimni o'tkazmaydi
+        settings = make_settings(window_days=10, percent_threshold=70.0)
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.total_found == 0
+
+    async def test_window_is_stored_on_the_candidate(self) -> None:
+        """Karta "eskirgan" belgisi shu qiymatga qaraydi, umumiy sozlamaga emas."""
+        settings = make_settings(window_days=10)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        rows = await repo.card_items("eski")
+        assert rows[0]["window_days"] == 10
+
+    async def test_original_settings_are_not_mutated(self) -> None:
+        asl = make_settings(window_days=5)
+        nusxa = asl.model_copy(update={"window_days": 10})
+        await check_service.run_check(self._gateway(), nusxa, today=TODAY)
+        assert asl.window_days == 5
