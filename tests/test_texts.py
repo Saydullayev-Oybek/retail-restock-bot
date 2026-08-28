@@ -25,6 +25,7 @@ def row(**overrides) -> dict:
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
+        "days_to_50": 2,
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)
@@ -84,6 +85,24 @@ class TestCardCaption:
     def test_percent_has_no_trailing_zero(self) -> None:
         assert "(80%)" in texts.card_caption([row(percent=80.0)], today=TODAY)
         assert "(66.7%)" in texts.card_caption([row(percent=66.7)], today=TODAY)
+
+    def test_shows_arrival_date_and_speed(self) -> None:
+        """Buyer bozorda: qachon kelgan, qanchasi ketgan, qanchalik tez."""
+        text = texts.card_caption(
+            [row(arrived_date="2026-08-22", base_qty=5, sold_qty=4,
+                 percent=80.0, days_to_50=2)],
+            today=TODAY,
+        )
+        assert "22-avg keldi: 5 dona" in text     # qachon va nechta keldi
+        assert "5 kunda 4 sotildi" in text        # qancha vaqtda qancha ketdi
+        assert "(80%)" in text
+        assert "50%ga 2-kunda" in text            # tezlik
+
+    def test_same_day_arrival(self) -> None:
+        text = texts.card_caption(
+            [row(arrived_date=TODAY.isoformat())], today=TODAY
+        )
+        assert "shu kuni" in text
 
     def test_empty_rows(self) -> None:
         assert texts.card_caption([]) == "Band topilmadi."
@@ -170,10 +189,11 @@ class TestAgeLabel:
         kelgan bo'lishi mumkin — uning raqamlari allaqachon eskirgan.
         Real holat: 104 banddan 82 tasi aynan shunday edi.
         """
-        # kecha aniqlangan, lekin partiya 6 kunlik -> ESKIRGAN
+        # kecha aniqlangan, lekin partiya 6 kunlik -> ESKIRGAN.
+        # Kun soni takrorlanmaydi — kelgan sana kartada allaqachon bor.
         assert texts.age_label(
             "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-21"
-        ) == "⚠️ kecha · eskirgan"
+        ) == "⚠️ eskirgan"
         # kecha aniqlangan, partiya 2 kunlik -> toza
         assert texts.age_label(
             "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-25"

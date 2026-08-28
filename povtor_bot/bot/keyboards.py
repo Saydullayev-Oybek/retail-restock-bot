@@ -61,9 +61,11 @@ def skus_kb(cat_ref: int, sup_ref: int, rows: list[tuple[int, str, str, int, int
 #   * QATTIQ  — 100 tugma va 4096 belgi. Oshsa Telegram xabarni RAD ETADI.
 #   * YUMSHOQ — 1024 belgi caption. Oshsa rasm ko'rsatilmaydi, matnga o'tadi.
 #
-# 6 ta band = 18-22 tugma va ~900 belgi. Qattiq chegaradan uzoq, va uzun
-# tovar nomlari bilan ham odatda caption chegarasiga sig'adi.
-CARD_PAGE_SIZE = 6
+# 5 ta band = 16 tugma va ~950 belgi eng yomon holatda (uzun tovar nomi,
+# uzun ta'minotchi nomi, eskirgan belgisi bilan) — ya'ni karta RASM bilan
+# chiqishda davom etadi. 6 ta bandda caption 1110 belgi bo'lib chegaradan
+# oshadi va rasm yo'qoladi.
+CARD_PAGE_SIZE = 5
 
 
 def page_slice(rows: list[Any], page: int) -> tuple[list[Any], int, int]:

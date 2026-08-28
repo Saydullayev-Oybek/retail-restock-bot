@@ -13,6 +13,26 @@ from typing import Any
 
 from ..core.models import STATUS_NOT_FOUND, STATUS_PENDING, STATUS_TAKEN
 
+OYLAR = ("yan", "fev", "mar", "apr", "may", "iyn",
+         "iyl", "avg", "sen", "okt", "noy", "dek")
+
+
+def short_date(value: str) -> str:
+    """'2026-08-22' -> '22-avg'. Karta tor, to'liq sana joy egallaydi."""
+    try:
+        d = date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return ""
+    return f"{d.day}-{OYLAR[d.month - 1]}"
+
+
+def days_between(start: str, end: date) -> int | None:
+    try:
+        return (end - date.fromisoformat(str(start))).days
+    except (TypeError, ValueError):
+        return None
+
+
 STATUS_ICON = {
     STATUS_PENDING: "⚪️",
     STATUS_TAKEN: "✅",
@@ -66,10 +86,15 @@ def age_label(
         except (TypeError, ValueError):
             eskirgan = False
 
+    # Eskirgan bo'lsa kun sonini takrorlamaymiz: kelgan sana yuqoridagi
+    # qatorda allaqachon turibdi ("18-avg keldi"), va "eskirgan" so'zining
+    # o'zi yetarli signal. Har band uchun 13 belgi tejaydi — bu karta
+    # rasm bilan chiqishida hal qiluvchi bo'lishi mumkin.
+    if eskirgan:
+        return "⚠️ eskirgan"
     if days <= 0:
-        return "⚠️ eskirgan" if eskirgan else ""
-    text = "kecha" if days == 1 else f"{days} kun oldin"
-    return f"⚠️ {text} · eskirgan" if eskirgan else text
+        return ""
+    return "kecha" if days == 1 else f"{days} kun oldin"
 
 
 def card_caption(
@@ -107,18 +132,29 @@ def card_caption(
         icon = STATUS_ICON.get(row["status"], "⚪️")
         shop = esc(row["shop_name"])
         color = f" · {esc(row['color'])}" if row["color"] else ""
-        percent = f"{row['percent']:g}"
         lines.append(f"{icon} <b>{shop}</b>{color} — <b>{row['recommended_qty']} dona</b>")
-        stats = (
-            f"{row['base_qty']} kelgan, {row['sold_qty']} sotilgan "
-            f"({percent}%) · {esc(row['grade'])}"
+
+        # 1-qator: qachon va nechta kelgani, o'shandan beri qancha sotilgani.
+        # Buyer bozorda turib qaror qabul qiladi — unga "qachon kelgan" va
+        # "qanchasi ketgan" degan ikkita raqam kerak.
+        kelgan = short_date(row["arrived_date"])
+        otgan = days_between(row["arrived_date"], today)
+        percent = f"{row['percent']:g}"
+        kun = f"{otgan} kunda" if otgan and otgan > 0 else "shu kuni"
+        lines.append(
+            f"    <i>{kelgan} keldi: {row['base_qty']} dona · "
+            f"{kun} {row['sold_qty']} sotildi ({percent}%)</i>"
         )
+
+        # 2-qator: daraja, 50% ga yetish tezligi va eskirish belgisi
+        detal = [esc(row["grade"]), f"50%ga {row['days_to_50']}-kunda"]
         age = age_label(
             row["detected_date"], today, stale_after_days, row["arrived_date"]
         )
         if age:
-            stats += f" · {age}"
-        lines.append(f"    <i>{stats}</i>")
+            detal.append(age)
+        lines.append(f"    <i>{' · '.join(detal)}</i>")
+
         if row["status"] != STATUS_PENDING:
             lines.append(f"    → <b>{esc(STATUS_LABEL[row['status']])}</b>")
         if row["transfer_hint"]:
