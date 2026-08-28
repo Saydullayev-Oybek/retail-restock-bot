@@ -82,6 +82,7 @@ def rule_config(settings: Settings) -> RuleConfig:
         high_percent=settings.high_percent,
         allowed_category_groups=tuple(settings.allowed_category_groups),
         high_percent_overrides_min_sold=settings.high_percent_overrides_min_sold,
+        grade_rule=settings.grade_rule,
     )
 
 

@@ -75,8 +75,12 @@ class Settings(BaseSettings):
     window_days: int = 5
     percent_threshold: float = 50.0
     min_base_qty: int = 5
-    confident_max_days: int = 3
+    # Texnik topshiriq: "2 kun ichida yetsa — yuqori tavsiya miqdori"
+    confident_max_days: int = 2
     confident_min_sold: int = 4
+    # "speed" — texnik topshiriqdagi qoida (faqat tezlik)
+    # "speed_and_volume" — namuna Excel'dan olingan (tezlik + hajm)
+    grade_rule: str = "speed"
     qty_confident: int = 10
     qty_normal: int = 5
     high_percent: float = 80.0
