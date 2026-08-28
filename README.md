@@ -36,21 +36,7 @@ Skript do'konlar ro'yxatini `id  nom` ko'rinishida chiqaradi.
 
 ---
 
-## Doimiy ishlatish (macOS)
-
-Terminal yopilsa bot o'ladi va ertalabki 09:00 tekshiruvi bo'lmaydi.
-`launchd` bilan Mac yonganda avtomatik ishga tushadi va yiqilsa qayta ko'tariladi:
-
-```bash
-cp deploy/com.povtor.bot.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.povtor.bot.plist
-```
-
-To'xtatish: `launchctl unload ~/Library/LaunchAgents/com.povtor.bot.plist`
-Log: `tail -f var/bot.log`
-
-> Uzoq muddatda VPS afzalroq — noutbuk kechqurun yopiladi, 09:00 tekshiruvi
-> esa menejer ishga kelguncha tayyor bo'lishi kerak.
+## Ishga tushirish haqida
 
 **Bitta nusxa qulfi.** Bot ishga tushganda `var/povtor.lock` faylini band
 qiladi. Ikkinchi nusxa darhol to'xtaydi va ishlab turgan jarayonning PID'ini
