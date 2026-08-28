@@ -309,6 +309,8 @@ async def _run_check(
         cfg=cfg,
         usd_rate=usd_rate,
     )
+    run_id = await repo.next_run_id()
+
     # Yangi partiya kelgan bandlarni yopamiz. Bu nomzod HISOBLASHDAN
     # mustaqil: sklad tovar yuborgan bo'lsa ehtiyoj qondirilgan, hatto yangi
     # partiya qoidaga tushmasa ham (masalan hali hech nima sotilmagan).
@@ -324,7 +326,10 @@ async def _run_check(
     if yopildi:
         log.info("Yangi partiya kelgani uchun %d band yopildi", yopildi)
 
-    new_count = await repo.insert_candidates(candidates)
+    new_count = await repo.insert_candidates(candidates, run_id)
+    # Tekshiruv tugadi — menyu endi shu raqamdagi bandlarni ko'rsatadi.
+    # Nomzod topilmagan bo'lsa ham chaqiriladi: bo'sh natija ham natija.
+    await repo.finish_run(run_id)
 
     if settings.raw_retention_days > 0:
         await repo.purge_raw(settings.raw_retention_days)

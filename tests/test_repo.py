@@ -431,3 +431,69 @@ class TestWindowDaysMigration:
 
         assert "window_days" in cols
         assert row["n"] == 1 and row["w"] == 5     # sukut qiymat
+
+
+class TestMenuShowsOnlyTheLastRun:
+    """Menyu OXIRGI tekshiruv natijasini ko'rsatadi.
+
+    Menejer /tekshir da qoidani (oyna, chegara) o'zi tanlaydi — ro'yxat aynan
+    shu qoidaga javob berishi kerak. Ilgari eski tekshiruvlar natijasi
+    to'planib borardi: 3 kun / 70% bilan 0 ta topilsa ham menyuda 101 ta
+    band turaverardi.
+    """
+
+    async def _run(self, *candidates):
+        run_id = await repo.next_run_id()
+        await repo.insert_candidates(list(candidates), run_id)
+        await repo.finish_run(run_id)
+        return run_id
+
+    async def test_previous_run_disappears(self) -> None:
+        await self._run(make_candidate(sku="eski"))
+        assert await repo.open_count() == 1
+
+        await self._run(make_candidate(sku="yangi"))
+        assert await repo.open_count() == 1
+        rows = await repo.categories_with_open_counts()
+        assert sum(r["open_count"] for r in rows) == 1
+
+    async def test_empty_run_empties_the_menu(self) -> None:
+        """Hech nima topilmasa menyu ham bo'sh bo'lishi kerak."""
+        await self._run(make_candidate(sku="1"), make_candidate(sku="2"))
+        assert await repo.open_count() == 2
+
+        await self._run()          # qattiq qoida, hech nima topilmadi
+        assert await repo.open_count() == 0
+        assert await repo.categories_with_open_counts() == []
+
+    async def test_item_found_again_stays(self) -> None:
+        """O'sha band qayta topilsa ro'yxatda qoladi."""
+        await self._run(make_candidate(sold_qty=3, percent=60.0))
+        await self._run(make_candidate(sold_qty=5, percent=100.0))
+        assert await repo.open_count() == 1
+        row = (await repo.card_items("39666"))[0]
+        assert row["sold_qty"] == 5           # statistikasi ham yangilandi
+
+    async def test_answered_items_are_kept_in_the_database(self) -> None:
+        """Menyudan chiqqan band YO'QOLMAYDI — javoblar va tarix qoladi."""
+        await self._run(make_candidate(sku="1"))
+        rows = await repo.card_items("1")
+        await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
+
+        await self._run(make_candidate(sku="2"))
+        saqlangan = await repo.get_candidate(rows[0]["id"])
+        assert saqlangan is not None and saqlangan["status"] == STATUS_TAKEN
+
+    async def test_unanswered_item_returns_when_found_again(self) -> None:
+        """Kengroq qoida bilan qayta tekshirilsa eski band qaytadi."""
+        await self._run(make_candidate(sku="1"))
+        await self._run(make_candidate(sku="2"))
+        assert {r["sku"] for r in await repo.card_items("1")} == {"1"}   # bazada bor
+        assert await repo.open_count() == 1                              # menyuda yo'q
+
+        await self._run(make_candidate(sku="1"), make_candidate(sku="2"))
+        assert await repo.open_count() == 2                              # ikkalasi qaytdi
+
+    async def test_no_run_yet_means_empty_menu(self) -> None:
+        assert await repo.current_run_id() == 0
+        assert await repo.categories_with_open_counts() == []

@@ -271,11 +271,38 @@ _CANDIDATE_COLUMNS = (
     "detected_date, shop_id, shop_name, category_group, subcategory, kind, product_name, "
     "sku, color, supplier, product_id, image_url, supply_price, supply_currency, "
     "price_uzs, base_qty, sold_qty, percent, days_to_50, grade, recommended_qty, "
-    "note, arrived_date, window_days"
+    "note, arrived_date, window_days, last_run"
 )
 
 
-async def insert_candidates(candidates: Sequence[Candidate]) -> int:
+async def next_run_id() -> int:
+    """Keyingi tekshiruv raqami.
+
+    Menyu faqat eng oxirgi tekshiruv natijasini ko'rsatadi, shuning uchun har
+    tekshiruvga o'z raqami kerak. Vaqt tamg'asi emas, sanoq: ikki tekshiruv
+    bir soniyada tugasa ham ular ajralib turadi.
+    """
+    raw = await kv_get("check_run_seq")
+    return int(raw or 0) + 1
+
+
+async def finish_run(run_id: int) -> None:
+    """Tekshiruv tugadi — menyu shu raqamdagi bandlarni ko'rsatadi.
+
+    Nomzod TOPILMASA ham chaqiriladi: bo'sh natija ham natija, va menyu
+    eski tekshiruvni ko'rsatib turmasligi kerak.
+    """
+    await kv_set("check_run_seq", str(run_id))
+
+
+async def current_run_id() -> int:
+    raw = await kv_get("check_run_seq")
+    return int(raw or 0)
+
+
+async def insert_candidates(
+    candidates: Sequence[Candidate], run_id: int | None = None
+) -> int:
     """Nomzodlarni yozadi. Qaytadi: YANGI qo'shilganlar soni.
 
     Uch xil holat:
@@ -291,7 +318,16 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
     `detected_date` ataylab yangilanmaydi — u "bu bandni birinchi marta qachon
     ko'rsatgan edik" degan ma'noni saqlaydi, kartadagi yosh shundan hisoblanadi.
     """
+    # run_id berilmasa o'z tekshiruvimizni ochib yopamiz. /tekshir uni
+    # ataylab beradi: yangi partiyalarni yopish va nomzodlarni yozish BITTA
+    # tekshiruvga tegishli bo'lishi kerak.
+    auto = run_id is None
+    if auto:
+        run_id = await next_run_id()
+
     if not candidates:
+        if auto:
+            await finish_run(run_id)
         return 0
     payload = [
         (
@@ -299,11 +335,11 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
             c.subcategory, c.kind, c.product_name, c.sku, c.color, c.supplier, c.product_id,
             c.image_url, c.supply_price, c.supply_currency, c.price_uzs, c.base_qty,
             c.sold_qty, c.percent, c.days_to_50, c.grade, c.recommended_qty,
-            c.note, c.arrived_date.isoformat(), c.window_days,
+            c.note, c.arrived_date.isoformat(), c.window_days, run_id,
         )
         for c in candidates
     ]
-    placeholders = ", ".join(["?"] * 24)
+    placeholders = ", ".join(["?"] * 25)
     async with write_lock():
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         before = (await cursor.fetchone())["n"]
@@ -320,7 +356,9 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
                 note            = excluded.note,
                 price_uzs       = excluded.price_uzs,
                 product_name    = excluded.product_name,
-                image_url       = excluded.image_url
+                image_url       = excluded.image_url,
+                window_days     = excluded.window_days,
+                last_run        = excluded.last_run
             WHERE candidate.status = '{STATUS_PENDING}'
             """,
             payload,
@@ -328,6 +366,8 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         after = (await cursor.fetchone())["n"]
         await db().commit()
+    if auto:
+        await finish_run(run_id)
     return after - before
 
 
@@ -374,7 +414,7 @@ async def categories_with_open_counts(detected_date: date | None = None) -> list
         f"""
         SELECT category_group, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL {where}
+        WHERE {_OPEN} {where}
         GROUP BY category_group
         HAVING open_count > 0
         ORDER BY open_count DESC, category_group
@@ -393,7 +433,7 @@ async def suppliers_with_open_counts(
         f"""
         SELECT supplier, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL AND category_group = ? {where}
+        WHERE {_OPEN} AND category_group = ? {where}
         GROUP BY supplier
         HAVING open_count > 0
         ORDER BY open_count DESC, supplier
@@ -415,7 +455,7 @@ async def skus_with_open_counts(
                MAX(product_name)              AS product_name,
                SUM(recommended_qty)           AS total_qty
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL
+        WHERE {_OPEN}
           AND category_group = ? AND supplier = ? {where}
         GROUP BY sku
         HAVING open_count > 0
@@ -529,8 +569,7 @@ async def answered_for_export(report_date: date) -> list[aiosqlite.Row]:
 async def open_count(detected_date: date | None = None) -> int:
     where, params = _date_filter(detected_date)
     async with db().execute(
-        f"SELECT COUNT(*) AS n FROM candidate "
-        f"WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL {where}",
+        f"SELECT COUNT(*) AS n FROM candidate WHERE {_OPEN} {where}",
         params,
     ) as cursor:
         return (await cursor.fetchone())["n"]
@@ -546,6 +585,16 @@ def _date_filter(detected_date: date | None) -> tuple[str, tuple[Any, ...]]:
     if detected_date is None:
         return "", ()
     return "AND detected_date = ?", (detected_date.isoformat(),)
+
+
+# Menyu faqat oxirgi tekshiruvda topilgan bandlarni ko'rsatadi. Menejer
+# qoidani (oyna, chegara) o'zi tanlagan ekan, ro'yxat aynan shu qoidaga
+# javob berishi kerak — aks holda eski tekshiruvlar natijasi to'planib,
+# bugungi ish ular orasida ko'rinmay qoladi.
+_OPEN = (
+    f"status = '{STATUS_PENDING}' AND superseded_at IS NULL "
+    "AND last_run = (SELECT CAST(value AS INTEGER) FROM kv WHERE key = 'check_run_seq')"
+)
 
 
 # ───────────────────────────── card_msg ─────────────────────────────

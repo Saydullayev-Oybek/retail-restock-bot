@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS candidate (
     -- oladi, shuning uchun "eskirgan" belgisi umumiy sozlamaga emas, aynan
     -- shu bandni topgan oynaga solishtiriladi.
     window_days       INTEGER NOT NULL DEFAULT 5,
+    -- Band OXIRGI marta qaysi tekshiruvda topilgani (tekshiruv raqami).
+    -- Menyu faqat eng oxirgi tekshiruv natijasini ko'rsatadi: menejer
+    -- qoidani o'zi tanlagan ekan, ro'yxat aynan shu qoidaga javob berishi
+    -- kerak. Aks holda eski tekshiruvlar natijasi ustma-ust to'planadi.
+    last_run          INTEGER NOT NULL DEFAULT 0,
 
     status            TEXT    NOT NULL DEFAULT 'pending'
                               CHECK (status IN ('pending', 'taken', 'not_found')),

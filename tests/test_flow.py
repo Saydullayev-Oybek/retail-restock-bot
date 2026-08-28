@@ -403,3 +403,29 @@ class TestAnnounceCommand:
         await dispatcher.feed_update(bot, command_update("/yangi"))
         assert "ANNOUNCE_CHAT_ID" in bot.texts_of("SendMessage")[0]
         await bot.session.close()
+
+
+class TestMenuFollowsTheLastCheck:
+    """`/buyurtma` oxirgi `/tekshir` natijasini ko'rsatadi."""
+
+    async def test_empty_result_explains_how_to_widen(self) -> None:
+        # tekshiruv bo'lgan, lekin hech nima topilmagan
+        run_id = await repo.next_run_id()
+        await repo.insert_candidates([], run_id)
+        await repo.finish_run(run_id)
+
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
+        await dispatcher.feed_update(bot, command_update("/buyurtma"))
+
+        matn = bot.texts_of("SendMessage")[0]
+        assert "oxirgi" in matn.lower()
+        assert "/tekshir 7 50" in matn      # nima qilishni aytadi
+        await bot.session.close()
+
+    async def test_before_any_check_asks_to_run_one(self) -> None:
+        bot = RecordingBot()
+        dispatcher = build_dispatcher(FakeGateway(), settings_for())
+        await dispatcher.feed_update(bot, command_update("/buyurtma"))
+        assert "/tekshir" in bot.texts_of("SendMessage")[0]
+        await bot.session.close()

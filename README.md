@@ -90,6 +90,19 @@ Band **qaysi oyna bilan topilgani** o'z qatorida saqlanadi (`window_days`),
 shuning uchun 10 kunlik tekshiruvdan chiqqan 7 kunlik band `⚠️ eskirgan`
 deb belgilanmaydi.
 
+### `/buyurtma` oxirgi tekshiruv natijasini ko'rsatadi
+
+Menejer qoidani o'zi tanlagan ekan, ro'yxat aynan **shu qoidaga** javob
+berishi kerak. Har band qaysi tekshiruvda topilgani saqlanadi (`last_run`),
+va menyu faqat eng oxirgisini ko'rsatadi.
+
+Ilgari natijalar **to'planib borardi**: `3 kun / 70%` bilan 0 ta topilsa ham
+menyuda oldingi tekshiruvlardan qolgan 101 ta band turaverardi, va bugungi
+ish ular orasida ko'rinmasdi.
+
+Bandlar **o'chirilmaydi** — ular bazada, kartada va `/export` da qoladi.
+Kengroq qoida bilan qayta tekshirilsa ro'yxatga qaytadi.
+
 ## Nomzod aniqlash qoidasi
 
 Har bir `(filial, artikul, rang)` uchun:

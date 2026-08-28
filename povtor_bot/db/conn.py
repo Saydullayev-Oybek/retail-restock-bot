@@ -41,6 +41,7 @@ async def connect(db_path: str) -> aiosqlite.Connection:
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("candidate", "superseded_at", "TEXT"),
     ("candidate", "window_days", "INTEGER NOT NULL DEFAULT 5"),
+    ("candidate", "last_run", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

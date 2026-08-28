@@ -530,3 +530,42 @@ class TestWindowOverride:
         nusxa = asl.model_copy(update={"window_days": 10})
         await check_service.run_check(self._gateway(), nusxa, today=TODAY)
         assert asl.window_days == 5
+
+
+class TestRunScopedMenu:
+    """/tekshir tugagach menyu aynan shu tekshiruv natijasini ko'rsatadi."""
+
+    async def test_strict_rule_clears_the_menu(self) -> None:
+        settings = make_settings()
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 3)],     # 60%
+            products=[a_product(sku="1")],
+        )
+        # 50% chegara -> topiladi
+        await check_service.run_check(gateway, settings, today=TODAY)
+        assert await repo.open_count() == 1
+
+        # 80% chegara -> topilmaydi, menyu bo'shashi kerak
+        qattiq = settings.model_copy(update={"percent_threshold": 80.0})
+        result = await check_service.run_check(gateway, qattiq, today=TODAY)
+        assert result.total_found == 0
+        assert await repo.open_count() == 0
+
+        # band bazada saqlanib qoldi
+        assert len(await repo.card_items("1")) == 1
+
+    async def test_wider_rule_brings_items_back(self) -> None:
+        settings = make_settings()
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 3)],
+            products=[a_product(sku="1")],
+        )
+        await check_service.run_check(
+            gateway, settings.model_copy(update={"percent_threshold": 80.0}), today=TODAY
+        )
+        assert await repo.open_count() == 0
+
+        await check_service.run_check(gateway, settings, today=TODAY)
+        assert await repo.open_count() == 1

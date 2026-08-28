@@ -179,13 +179,18 @@ async def cmd_order(message: Message) -> None:
     """Kaskadli menyuning 1-darajasi."""
     rows = await categories_rows()
     if not rows:
-        total = await repo.open_count()
-        if total == 0 and await repo.latest_detected_date() is None:
-            await message.answer(
-                "Baza bo'sh. Avval /tekshir ni ishlating."
-            )
+        if await repo.current_run_id() == 0:
+            await message.answer("Baza bo'sh. Avval /tekshir ni ishlating.")
         else:
-            await message.answer("Hal qilinmagan band qolmadi. 🎉")
+            # Menyu OXIRGI tekshiruv natijasini ko'rsatadi, shuning uchun
+            # bo'shlik ikki xil bo'lishi mumkin: hammasi hal qilingan yoki
+            # tanlangan qoida hech nima topmagan
+            await message.answer(
+                "Oxirgi tekshiruvda ko'rsatadigan band yo'q.\n\n"
+                "<i>Ro'yxat oxirgi <b>/tekshir</b> natijasini ko'rsatadi. "
+                "Kengroq oyna yoki past chegara bilan qayta urinib ko'ring — "
+                "masalan <code>/tekshir 7 50</code>.</i>"
+            )
         return
     await message.answer(
         "📂 <b>Kategoriya tanlang</b>", reply_markup=keyboards.categories_kb(rows)
