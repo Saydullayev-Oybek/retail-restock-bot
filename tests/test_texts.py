@@ -25,7 +25,7 @@ def row(**overrides) -> dict:
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
-        "days_to_50": 2,
+        "days_to_50": 2, "superseded_at": None,
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)

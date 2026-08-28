@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS candidate (
     status            TEXT    NOT NULL DEFAULT 'pending'
                               CHECK (status IN ('pending', 'taken', 'not_found')),
     transfer_hint     TEXT    NOT NULL DEFAULT '',  -- "BOZORDA YO'Q" da: qayerdan olsa bo'ladi
+    -- Shu (filial, artikul, rang) uchun YANGI partiya kelgan sana.
+    -- To'ldirilgan bo'lsa band menyudan chiqadi: ehtiyoj allaqachon qondirilgan,
+    -- va uning raqamlari eski partiyaga tegishli. Aks holda bot "yana ol" deb
+    -- turaverardi, sklad esa allaqachon yuborgan bo'lardi.
+    superseded_at     TEXT,
     answered_by       INTEGER,
     answered_at       TEXT,
     created_at        TEXT    NOT NULL DEFAULT (datetime('now')),

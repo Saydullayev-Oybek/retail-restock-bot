@@ -61,6 +61,8 @@ class CheckResult:
     usd_rate: float = 0.0
     transfer_rows: int = 0
     synced_skus: int = 0
+    # Yangi partiya kelgani uchun avtomatik yopilgan bandlar
+    superseded: int = 0
     error: str = ""
 
     @property
@@ -306,6 +308,21 @@ async def _run_check(
         cfg=cfg,
         usd_rate=usd_rate,
     )
+    # Yangi partiya kelgan bandlarni yopamiz. Bu nomzod HISOBLASHDAN
+    # mustaqil: sklad tovar yuborgan bo'lsa ehtiyoj qondirilgan, hatto yangi
+    # partiya qoidaga tushmasa ham (masalan hali hech nima sotilmagan).
+    oxirgi: dict[tuple[str, str, str], date] = {}
+    for row in colored_transfers:
+        key = (row.to_shop_id, row.sku, row.color)
+        if key not in oxirgi or row.arrived_date > oxirgi[key]:
+            oxirgi[key] = row.arrived_date
+    yopildi = await repo.supersede_by_new_arrivals(
+        [(shop, sku, color, kun.isoformat())
+         for (shop, sku, color), kun in oxirgi.items()]
+    )
+    if yopildi:
+        log.info("Yangi partiya kelgani uchun %d band yopildi", yopildi)
+
     new_count = await repo.insert_candidates(candidates)
 
     if settings.raw_retention_days > 0:
@@ -322,6 +339,7 @@ async def _run_check(
         usd_rate=usd_rate,
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,
+        superseded=yopildi,
     )
 
 

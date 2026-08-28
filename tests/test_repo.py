@@ -306,3 +306,83 @@ class TestExport:
         await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
         exported = await repo.answered_for_export(date.today())
         assert [r["sku"] for r in exported] == ["eski"]
+
+
+class TestSupersedeByNewArrival:
+    """Sklad yangi partiya yuborsa eski band yopilishi kerak.
+
+    Ilgari bot bandni faqat menejer javob berganda yopardi. Natijada ikkita
+    xato holat bor edi:
+
+      * yangi partiya ham nomzod bo'lsa -> menejer bitta filial+rangni IKKI
+        MARTA ko'rib, ikki barobar buyurtma berib yuborishi mumkin edi;
+      * yangi partiya nomzod bo'lmasa (hali sotilmagan) -> bot hali ham
+        "yana N dona ol" deb turardi, sklad esa allaqachon yuborgan edi.
+    """
+
+    async def _eski(self, **kw):
+        await repo.insert_candidates([
+            make_candidate(arrived_date=TODAY - timedelta(days=6), **kw)
+        ])
+        return (await repo.card_items("39666"))[0]
+
+    async def test_older_batch_is_closed(self) -> None:
+        await self._eski()
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 1
+        assert await repo.open_count() == 0
+
+    async def test_closed_item_leaves_the_menu(self) -> None:
+        await self._eski()
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.categories_with_open_counts() == []
+
+    async def test_closed_item_stays_in_the_database(self) -> None:
+        """Band o'chirilmaydi — kartada va tarixda ko'rinib turadi."""
+        row = await self._eski()
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        saqlangan = await repo.get_candidate(row["id"])
+        assert saqlangan is not None
+        assert saqlangan["superseded_at"] == TODAY.isoformat()
+        assert saqlangan["status"] == "pending"
+
+    async def test_same_day_arrival_does_not_close(self) -> None:
+        """Faqat KEYINGI partiya yopadi — o'sha kungisi emas."""
+        await repo.insert_candidates([make_candidate(arrived_date=TODAY)])
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 0
+        assert await repo.open_count() == 1
+
+    async def test_answered_items_are_untouched(self) -> None:
+        """Menejer javob bergan band tarixda o'z holicha qolishi kerak."""
+        row = await self._eski()
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 0
+        saqlangan = await repo.get_candidate(row["id"])
+        assert saqlangan["status"] == STATUS_TAKEN
+        assert saqlangan["superseded_at"] is None
+
+    async def test_other_colors_are_not_affected(self) -> None:
+        await self._eski(color="Белый")
+        await self._eski(color="Синий")
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.open_count() == 1
+
+    async def test_repeated_call_is_idempotent(self) -> None:
+        await self._eski()
+        arrivals = [("shop1", "39666", "Белый", TODAY.isoformat())]
+        assert await repo.supersede_by_new_arrivals(arrivals) == 1
+        assert await repo.supersede_by_new_arrivals(arrivals) == 0

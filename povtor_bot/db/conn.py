@@ -29,9 +29,27 @@ async def connect(db_path: str) -> aiosqlite.Connection:
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
     await conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    await _migrate(conn)
     await conn.commit()
     _conn = conn
     return conn
+
+
+# Mavjud bazalarga qo'shilishi kerak bo'lgan ustunlar.
+# CREATE TABLE IF NOT EXISTS eski jadvalni o'zgartirmaydi, shuning uchun
+# yangi ustun alohida qo'shiladi.
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("candidate", "superseded_at", "TEXT"),
+)
+
+
+async def _migrate(conn: aiosqlite.Connection) -> None:
+    """Yetishmayotgan ustunlarni qo'shadi. Ma'lumot yo'qolmaydi."""
+    for table, column, decl in _MIGRATIONS:
+        async with conn.execute(f"PRAGMA table_info({table})") as cursor:
+            mavjud = {row["name"] for row in await cursor.fetchall()}
+        if column not in mavjud:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def db() -> aiosqlite.Connection:

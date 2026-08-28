@@ -157,6 +157,11 @@ def card_caption(
 
         if row["status"] != STATUS_PENDING:
             lines.append(f"    → <b>{esc(STATUS_LABEL[row['status']])}</b>")
+        elif row["superseded_at"]:
+            lines.append(
+                f"    → <b>yangi partiya keldi</b> "
+                f"<i>({short_date(row['superseded_at'])})</i>"
+            )
         if row["transfer_hint"]:
             lines.append(f"    🔁 {esc(row['transfer_hint'])}")
     return "\n".join(lines)
@@ -198,6 +203,9 @@ def check_report(result: Any) -> str:
     ]
     if result.usd_rate:
         lines.append(f"USD kursi: {result.usd_rate:g}")
+    yopildi = getattr(result, "superseded", 0)
+    if yopildi:
+        lines.append(f"Yangi partiya keldi: <b>{yopildi}</b> band yopildi")
     if result.new_count == 0 and result.total_found:
         lines.append("\n<i>Yangi nomzod yo'q — hammasi allaqachon bazada.</i>")
     lines.append("\n/buyurtma — ro'yxatni ochish")

@@ -331,6 +331,42 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
     return after - before
 
 
+async def supersede_by_new_arrivals(
+    arrivals: Sequence[tuple[str, str, str, str]]
+) -> int:
+    """Yangi partiya kelgan bandlarni yopadi.
+
+    arrivals — (shop_id, sku, color, arrived_date) oxirgi kelishlar.
+
+    Nega kerak: bot bandni faqat menejer javob berganda yopardi. Agar sklad
+    o'zi yangi partiya yuborsa, eski band menyuda "yana N dona ol" deb
+    turaverardi — ehtiyoj allaqachon qondirilgan bo'lsa ham. Bundan tashqari
+    yangi partiya ham nomzod bo'lsa, menejer bitta filial+rangni IKKI MARTA
+    ko'rib, ikki barobar buyurtma berib yuborishi mumkin edi.
+
+    Faqat javob berilmagan bandlar yopiladi: menejer allaqachon "OLINDI"
+    deb belgilagan band tarixda o'z holicha qolishi kerak.
+    """
+    if not arrivals:
+        return 0
+    async with write_lock():
+        cursor = await db().executemany(
+            f"""
+            UPDATE candidate
+               SET superseded_at = ?
+             WHERE shop_id = ? AND sku = ? AND color = ?
+               AND arrived_date < ?
+               AND status = '{STATUS_PENDING}'
+               AND superseded_at IS NULL
+            """,
+            [(arrived, shop, sku, color, arrived)
+             for shop, sku, color, arrived in arrivals],
+        )
+        yopildi = cursor.rowcount or 0
+        await db().commit()
+    return yopildi
+
+
 async def categories_with_open_counts(detected_date: date | None = None) -> list[aiosqlite.Row]:
     """Menyuning 1-darajasi: kategoriya + hal qilinmagan bandlar soni."""
     where, params = _date_filter(detected_date)
@@ -338,7 +374,7 @@ async def categories_with_open_counts(detected_date: date | None = None) -> list
         f"""
         SELECT category_group, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' {where}
+        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL {where}
         GROUP BY category_group
         HAVING open_count > 0
         ORDER BY open_count DESC, category_group
@@ -357,7 +393,7 @@ async def suppliers_with_open_counts(
         f"""
         SELECT supplier, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND category_group = ? {where}
+        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL AND category_group = ? {where}
         GROUP BY supplier
         HAVING open_count > 0
         ORDER BY open_count DESC, supplier
@@ -379,7 +415,8 @@ async def skus_with_open_counts(
                MAX(product_name)              AS product_name,
                SUM(recommended_qty)           AS total_qty
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND category_group = ? AND supplier = ? {where}
+        WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL
+          AND category_group = ? AND supplier = ? {where}
         GROUP BY sku
         HAVING open_count > 0
         ORDER BY total_qty DESC, sku
@@ -402,7 +439,8 @@ async def card_items(sku: str, detected_date: date | None = None) -> list[aiosql
         WHERE sku = ? {where}
         -- Javob berilmaganlar OLDINDA: karta sahifalanganda menejer kerakli
         -- bandlarni birinchi sahifada ko'radi, hal qilinganlari esa oxirida
-        ORDER BY (status <> '{STATUS_PENDING}'), shop_name, color
+        ORDER BY (status <> '{STATUS_PENDING}' OR superseded_at IS NOT NULL),
+                 shop_name, color
         """,
         (sku, *params),
     ) as cursor:
@@ -491,7 +529,8 @@ async def answered_for_export(report_date: date) -> list[aiosqlite.Row]:
 async def open_count(detected_date: date | None = None) -> int:
     where, params = _date_filter(detected_date)
     async with db().execute(
-        f"SELECT COUNT(*) AS n FROM candidate WHERE status = '{STATUS_PENDING}' {where}",
+        f"SELECT COUNT(*) AS n FROM candidate "
+        f"WHERE status = '{STATUS_PENDING}' AND superseded_at IS NULL {where}",
         params,
     ) as cursor:
         return (await cursor.fetchone())["n"]

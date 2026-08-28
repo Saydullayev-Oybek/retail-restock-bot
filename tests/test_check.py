@@ -425,3 +425,54 @@ class TestStockRefreshCache:
         gw2 = self._gateway()
         await check_service.run_check(gw2, settings, today=TODAY)
         assert "stock" in gw2.calls
+
+
+class TestSupersedeInCheck:
+    """/tekshir yangi partiya kelganini o'zi payqashi kerak."""
+
+    async def test_new_arrival_closes_the_old_candidate(self) -> None:
+        from povtor_bot.core.models import Candidate
+
+        settings = make_settings()
+        # 6 kun oldingi band bazada turibdi
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=6), base_qty=5, sold_qty=3,
+            percent=60.0, days_to_50=4, grade="oddiy", recommended_qty=5,
+            note="60% sotildi", category_group="Poyasnaya",
+        )])
+        assert await repo.open_count() == 1
+
+        # Sklad bugun yubordi, lekin hali hech nima sotilmagan ->
+        # yangi nomzod TOPILMAYDI, eskisi baribir yopilishi kerak
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 20)],
+            sales=[],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, settings, today=TODAY)
+        assert result.total_found == 0
+        assert result.superseded == 1
+        assert await repo.open_count() == 0
+
+    async def test_both_batches_do_not_stack_up(self) -> None:
+        """Yangi partiya ham nomzod bo'lsa, menyuda BITTA band qolishi kerak."""
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=6), base_qty=5, sold_qty=3,
+            percent=60.0, days_to_50=4, grade="oddiy", recommended_qty=5,
+            note="x", category_group="Poyasnaya",
+        )])
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert result.total_found == 1
+        assert await repo.open_count() == 1          # ikkitasi emas
+        assert len(await repo.card_items("1")) == 2  # kartada ikkalasi ko'rinadi
