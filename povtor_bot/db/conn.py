@@ -48,6 +48,7 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("product_cache", "material", "TEXT NOT NULL DEFAULT ''"),
     ("product_variant", "brand", "TEXT NOT NULL DEFAULT ''"),
     ("product_variant", "material", "TEXT NOT NULL DEFAULT ''"),
+    ("candidate", "reopened_at", "TEXT"),
 )
 
 # Bir marta bajariladigan ma'lumot migratsiyalari: (kalit, SQL).

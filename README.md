@@ -205,6 +205,28 @@ qayta yoziladi.
 
 ### Muhim texnik qarorlar
 
+**Ikkita javob — ikkita umr.** `OLINDI` va `BOZORDA YO'Q` bir xil ko'rinadi,
+lekin ma'nosi teskari:
+
+| Javob | Ma'nosi | Keyingi tekshiruvda |
+|---|---|---|
+| `OLINDI` | ehtiyoj **qondirildi** | qaytmaydi — faqat sklad yangi partiya yuborsa, va u **yangi band** bo'ladi |
+| `BOZORDA YO'Q` | **bugun** topolmadim, ehtiyoj **qolmoqda** | **ertasi kuni qayta so'raladi** — bozorda paydo bo'lgan bo'lishi mumkin |
+
+Shu kunning o'zida qayta tekshirilsa `BOZORDA YO'Q` tegilmaydi: menejer ertalab
+"yo'q" deb, tushda o'sha bandni yana ko'rib turmasin. Qayta ochilgan band
+kartada `🔁 avval bozorda yo'q edi` deb belgilanadi.
+
+Cheklov: qayta ochish faqat band hali **oyna ichida** bo'lsa ko'rinadi. Tovar
+kelganiga `WINDOW_DAYS` dan ko'p bo'lsa, tekshiruv uni umuman topmaydi —
+u holda oynani kengaytirish kerak (`/tekshir 10 50`).
+
+**Kunlik hisobot manbai — `item_event`, `candidate.status` emas.** Qayta ochilgan
+bandning statusi yo'qoladi, o'sha kungi Excel esa o'zgarmasligi kerak. Hodisa
+jurnali har bir javobni vaqti bilan saqlaydi, shuning uchun kechagi fayl kechagi
+qarorlarni ko'rsatib turaveradi. Kun ichida javob berib keyin bekor qilingan band
+hisobotga tushmaydi — har band uchun kunning **oxirgi** hodisasi olinadi.
+
 **Rasm Telegram'ga yuklab olinadi, URL uzatilmaydi.** Billz hujjati CDN'dan
 rasmni uchinchi tomon resurslarida ko'rsatishni taqiqlaydi. Shu sababli rasm bir
 marta yuklab olinib Telegram'ga yuboriladi, qaytgan `file_id` `product_cache`ga

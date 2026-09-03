@@ -12,8 +12,18 @@ from datetime import date, timedelta
 import pytest
 
 from povtor_bot.config import Settings
-from povtor_bot.core.models import ProductInfo, SalesRow, Shop, StockRow, TransferRow
-from povtor_bot.db import repo
+from povtor_bot.bot import texts
+from povtor_bot.core.models import (
+    STATUS_NOT_FOUND,
+    STATUS_PENDING,
+    STATUS_TAKEN,
+    ProductInfo,
+    SalesRow,
+    Shop,
+    StockRow,
+    TransferRow,
+)
+from povtor_bot.db import conn, repo
 from povtor_bot.services import check as check_service
 
 pytestmark = pytest.mark.usefixtures("database")
@@ -425,6 +435,89 @@ class TestStockRefreshCache:
         gw2 = self._gateway()
         await check_service.run_check(gw2, settings, today=TODAY)
         assert "stock" in gw2.calls
+
+
+class TestNotFoundReopens:
+    """"BOZORDA YO'Q" — o'sha kunga tegishli javob, "OLINDI" — butunlay.
+
+    Loyiha egasi (2026-09-03): "bozorda yo'q qilganlarni ertasi kuni yana
+    ko'rsatishi kerak, chunki ertasi kuni bozorga kelgan bo'lishi mumkin.
+    Faqat olindi degan tovarni ko'rsatmaydi."
+    """
+
+    KELGAN = TODAY - timedelta(days=1)
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", self.KELGAN, 6),
+                       a_transfer("shop1", "2", "Белый", self.KELGAN, 6)],
+            sales=[a_sale("shop1", "1", "Белый", self.KELGAN, 5),
+                   a_sale("shop1", "2", "Белый", self.KELGAN, 5)],
+            products=[a_product(sku="1"), a_product(sku="2")],
+        )
+
+    async def _kecha_javob(self, sku: str, status: str) -> None:
+        """Bandga KECHA javob berilgan holatni yasaydi."""
+        row = (await repo.card_items(sku))[0]
+        await repo.answer_candidate(row["id"], status=status, user_id=1)
+        kecha = f"{(TODAY - timedelta(days=1)).isoformat()} 12:00:00"
+        await conn.db().execute(
+            "UPDATE candidate SET answered_at = ? WHERE id = ?", (kecha, row["id"]))
+        await conn.db().execute(
+            "UPDATE item_event SET created_at = ? WHERE candidate_id = ?",
+            (kecha, row["id"]))
+        await conn.db().commit()
+
+    async def test_yesterdays_not_found_comes_back(self) -> None:
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)   # bozorda yo'q edi
+        await self._kecha_javob("2", STATUS_TAKEN)       # olingan
+        assert await repo.open_count() == 0
+
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        assert result.reopened == 1
+        ochiq = {r["sku"] for r in await repo.card_items("1")
+                 if r["status"] == STATUS_PENDING}
+        assert ochiq == {"1"}, "bozorda yo'q bo'lgani qaytishi kerak"
+        assert (await repo.card_items("2"))[0]["status"] == STATUS_TAKEN, \
+            "olingani qaytmasligi kerak"
+        assert await repo.open_count() == 1
+
+    async def test_same_day_answer_is_not_reopened(self) -> None:
+        """Ertalab "yo'q" desa, tushdagi tekshiruv uni qayta so'ramaydi."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        row = (await repo.card_items("1"))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_NOT_FOUND, user_id=1)
+
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.reopened == 0
+        assert (await repo.card_items("1"))[0]["status"] == STATUS_NOT_FOUND
+
+    async def test_reopened_row_is_marked(self) -> None:
+        """Karta bandning nega qaytganini ko'rsatishi kerak."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        row = (await repo.card_items("1"))[0]
+        assert row["reopened_at"] is not None
+        assert row["transfer_hint"] == "", "eski transfer taklifi tozalanishi kerak"
+        assert "avval bozorda yo'q edi" in texts.card_caption([row], today=TODAY)
+
+    async def test_yesterdays_export_keeps_the_answer(self) -> None:
+        """Qayta ochish KECHAGI Excel hisobotini buzmasligi kerak."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        kecha = await repo.answered_for_export(TODAY - timedelta(days=1))
+        assert [(r["sku"], r["status"]) for r in kecha] == [("1", STATUS_NOT_FOUND)]
+        assert await repo.answered_for_export(TODAY) == []
 
 
 class TestSupersedeInCheck:

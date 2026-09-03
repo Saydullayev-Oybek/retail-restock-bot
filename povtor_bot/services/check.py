@@ -22,7 +22,7 @@ import logging
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, TypeVar
 
 from ..billz.gateway import BillzGateway
@@ -63,6 +63,8 @@ class CheckResult:
     synced_skus: int = 0
     # Yangi partiya kelgani uchun avtomatik yopilgan bandlar
     superseded: int = 0
+    # Kechagi "BOZORDA YO'Q" javoblari — bugun qayta so'raladi
+    reopened: int = 0
     error: str = ""
 
     @property
@@ -338,6 +340,20 @@ async def _run_check(
     )
     run_id = await repo.next_run_id()
 
+    # Kechagi "BOZORDA YO'Q" javoblarini qayta ochamiz: u javob "BUGUN
+    # topolmadim" degani edi, ehtiyoj esa qondirilmagan. Ertaga bozorda
+    # paydo bo'lishi mumkin, shuning uchun band yana so'raladi.
+    # "OLINDI" tegilmaydi — u yerda ehtiyoj yopilgan.
+    #
+    # Insert'dan OLDIN: qayta ochilgan qator `pending` bo'lgach,
+    # insert_candidates uni tekshiruvning o'z raqami bilan belgilaydi va
+    # band menyuda paydo bo'ladi.
+    ochildi = await repo.reopen_not_found(
+        datetime.combine(today, time.min, tzinfo=settings.timezone)
+    )
+    if ochildi:
+        log.info("Kechagi 'bozorda yo'q' javoblari qayta ochildi: %d", ochildi)
+
     # Yangi partiya kelgan bandlarni yopamiz. Bu nomzod HISOBLASHDAN
     # mustaqil: sklad tovar yuborgan bo'lsa ehtiyoj qondirilgan, hatto yangi
     # partiya qoidaga tushmasa ham (masalan hali hech nima sotilmagan).
@@ -369,6 +385,7 @@ async def _run_check(
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,
         superseded=yopildi,
+        reopened=ochildi,
     )
 
 

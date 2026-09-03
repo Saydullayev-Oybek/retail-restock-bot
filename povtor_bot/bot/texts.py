@@ -185,6 +185,11 @@ def card_caption(
             detal.append(age)
         lines.append(f"    <i>{' · '.join(detal)}</i>")
 
+        # Qayta ochilgan band eskisi bo'lib ko'rinadi — menejer uni nega
+        # yana ko'rayotganini bilib tursin
+        if row["status"] == STATUS_PENDING and _row_get(row, "reopened_at"):
+            lines.append("    <i>🔁 avval bozorda yo'q edi</i>")
+
         if row["status"] != STATUS_PENDING:
             lines.append(f"    → <b>{esc(STATUS_LABEL[row['status']])}</b>")
         elif row["superseded_at"]:
@@ -240,6 +245,11 @@ def check_report(result: Any, *, days: int = 0, percent: int = 0) -> str:
     yopildi = getattr(result, "superseded", 0)
     if yopildi:
         lines.append(f"Yangi partiya keldi: <b>{yopildi}</b> band yopildi")
+    ochildi = getattr(result, "reopened", 0)
+    if ochildi:
+        lines.append(
+            f"Bozorda yo'q edi: <b>{ochildi}</b> band qayta so'raladi"
+        )
     if result.new_count == 0 and result.total_found:
         lines.append("\n<i>Yangi nomzod yo'q — hammasi allaqachon bazada.</i>")
     lines.append("\n/buyurtma — ro'yxatni ochish")

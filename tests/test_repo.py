@@ -321,11 +321,20 @@ class TestExportUsesLocalDay:
     TASHKENT = ZoneInfo("Asia/Tashkent")
 
     async def _javob(self, sku: str, utc_vaqt: str) -> None:
+        """Berilgan UTC vaqtida javob berilgan bandni yasaydi.
+
+        Hisobot manbai `item_event`, shuning uchun hodisaning vaqti ham
+        surilishi kerak — faqat `candidate.answered_at` yetarli emas.
+        """
         await repo.insert_candidates([make_candidate(sku=sku)])
         row = (await repo.card_items(sku))[0]
         await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
         await conn.db().execute(
             "UPDATE candidate SET answered_at = ? WHERE id = ?", (utc_vaqt, row["id"])
+        )
+        await conn.db().execute(
+            "UPDATE item_event SET created_at = ? WHERE candidate_id = ?",
+            (utc_vaqt, row["id"]),
         )
         await conn.db().commit()
 

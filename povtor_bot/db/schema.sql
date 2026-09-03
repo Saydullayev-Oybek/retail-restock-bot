@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS candidate (
     -- va uning raqamlari eski partiyaga tegishli. Aks holda bot "yana ol" deb
     -- turaverardi, sklad esa allaqachon yuborgan bo'lardi.
     superseded_at     TEXT,
+    -- "BOZORDA YO'Q" javobi FAQAT o'sha kunga tegishli: ertaga bozorda
+    -- paydo bo'lishi mumkin. Shuning uchun keyingi kungi tekshiruv bunday
+    -- bandni qayta ochadi va shu ustunga belgi qo'yadi — menejer bu band
+    -- nega qaytganini bilib tursin. "OLINDI" esa hech qachon qaytmaydi:
+    -- u yerda ehtiyoj haqiqatan qondirilgan.
+    reopened_at       TEXT,
     answered_by       INTEGER,
     answered_at       TEXT,
     created_at        TEXT    NOT NULL DEFAULT (datetime('now')),

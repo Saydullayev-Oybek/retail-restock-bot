@@ -385,6 +385,52 @@ async def insert_candidates(
     return after - before
 
 
+async def reopen_not_found(before: datetime) -> int:
+    """Oldingi kunlarda "BOZORDA YO'Q" deb belgilangan bandlarni qayta ochadi.
+
+    Nega faqat `not_found`: bu javob "BUGUN bozorda topolmadim" degani, ehtiyoj
+    esa qondirilmagan — tovar filialda tugab turibdi va ertaga bozorda paydo
+    bo'lishi mumkin. "OLINDI" boshqa: u yerda ehtiyoj yopilgan, va qayta
+    so'rash menejerni ikki marta buyurtma berishga undardi.
+
+    `before` — mahalliy kunning boshi. Shu kunning O'ZIDA berilgan javob
+    tegilmaydi: menejer ertalab "yo'q" deb, tushda yana o'sha bandni ko'rib
+    turmasin.
+
+    Javob tarixi `item_event` da qoladi, shuning uchun o'sha kunning Excel
+    hisoboti qayta ochilgandan keyin ham to'g'ri bo'lib qolaveradi.
+    """
+    chegara = _utc_text(before)
+    async with write_lock():
+        # Avval ID'larni olamiz — hodisa yozuvi aynan shu qatorlarga tegishli
+        # bo'lsin (UPDATE dan keyin ularni ajratib bo'lmaydi)
+        async with db().execute(
+            f"SELECT id FROM candidate "
+            f"WHERE status = '{STATUS_NOT_FOUND}' AND answered_at < ?",
+            (chegara,),
+        ) as cursor:
+            ids = [row["id"] for row in await cursor.fetchall()]
+        if not ids:
+            return 0
+        await db().executemany(
+            f"""
+            UPDATE candidate
+               SET status = '{STATUS_PENDING}', answered_by = NULL,
+                   answered_at = NULL, transfer_hint = '',
+                   reopened_at = datetime('now')
+             WHERE id = ?
+            """,
+            [(i,) for i in ids],
+        )
+        await db().executemany(
+            "INSERT INTO item_event (candidate_id, user_id, action, payload) "
+            "VALUES (?, NULL, 'reopened', '{}')",
+            [(i,) for i in ids],
+        )
+        await db().commit()
+    return len(ids)
+
+
 async def supersede_by_new_arrivals(
     arrivals: Sequence[tuple[str, str, str, str]]
 ) -> int:
@@ -580,10 +626,27 @@ async def answered_for_export(
     oxiri = boshi + timedelta(days=1)
     async with db().execute(
         f"""
-        SELECT * FROM candidate
-        WHERE answered_at >= ? AND answered_at < ?
-          AND status IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
-        ORDER BY shop_name, percent DESC, sku, color
+        -- Manba `candidate.status` emas, `item_event`: "BOZORDA YO'Q" javobi
+        -- keyingi kungi tekshiruvda qayta ochiladi va qatordagi status
+        -- yo'qoladi, o'sha kunning hisoboti esa o'zgarmasligi kerak.
+        --
+        -- Har band uchun kunning OXIRGI hodisasi olinadi: menejer javob
+        -- berib, keyin bekor qilgan bo'lsa ("reset"), u kunlik hisobotga
+        -- tushmasligi kerak.
+        SELECT c.shop_name, c.sku, c.color, c.subcategory, c.kind, c.supplier,
+               c.brand, c.material, c.base_qty, c.sold_qty, c.percent,
+               c.days_to_50, c.grade, c.recommended_qty, c.note,
+               e.action AS status
+        FROM (
+            SELECT candidate_id, MAX(id) AS oxirgi
+            FROM item_event
+            WHERE created_at >= ? AND created_at < ?
+            GROUP BY candidate_id
+        ) kun
+        JOIN item_event e ON e.id = kun.oxirgi
+        JOIN candidate c ON c.id = e.candidate_id
+        WHERE e.action IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
+        ORDER BY c.shop_name, c.percent DESC, c.sku, c.color
         """,
         (_utc_text(boshi), _utc_text(oxiri)),
     ) as cursor:
