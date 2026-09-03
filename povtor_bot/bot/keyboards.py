@@ -119,15 +119,6 @@ def page_slice(rows: list[Any], page: int) -> tuple[list[Any], int, int]:
     return rows[start : start + CARD_PAGE_SIZE], page, total
 
 
-def _is_current(row: Any) -> bool:
-    """Band oxirgi tekshiruvda topilganmi. Ustun bo'lmasa — topilgan deb olamiz."""
-    try:
-        value = row["is_current"]
-    except (KeyError, IndexError, TypeError):
-        return True
-    return bool(value)
-
-
 def card_kb(
     rows: list[Any], cat_ref: int, sup_ref: int, sku_ref: int = 0, page: int = 0
 ) -> InlineKeyboardMarkup:
@@ -144,15 +135,7 @@ def card_kb(
     for row in visible:
         color = f" {row['color']}" if row["color"] else ""
         title = f"{row['shop_name']}{color}"
-        if row["status"] == STATUS_PENDING and not _is_current(row):
-            # Oxirgi tekshiruvda topilmagan band: raqamlari eskirgan va
-            # menyuda ham sanalmaydi. Javob tugmasi berilmaydi — aks holda
-            # menejer eski ma'lumot asosida buyurtma berardi.
-            builder.row(InlineKeyboardButton(
-                text=f"⏸ {title} — eski tekshiruvdan",
-                callback_data=NoopCB(tag="o").pack(),
-            ))
-        elif row["status"] == STATUS_PENDING:
+        if row["status"] == STATUS_PENDING:
             builder.row(
                 InlineKeyboardButton(text=title, callback_data=NoopCB(tag="h").pack())
             )

@@ -73,7 +73,13 @@ class TestInsertCandidates:
             make_candidate(arrived_date=TODAY, detected_date=TODAY + timedelta(days=1))
         ])
         assert yangi == 1
-        assert len(await repo.card_items("39666")) == 2
+        # Bazada ikkalasi ham bor; kartada faqat oxirgi tekshiruvniki
+        async with conn.db().execute(
+            "SELECT COUNT(*) AS n FROM candidate WHERE sku = '39666'"
+        ) as cursor:
+            assert (await cursor.fetchone())["n"] == 2
+        kartada = await repo.card_items("39666")
+        assert [r["arrived_date"] for r in kartada] == [TODAY.isoformat()]
 
     async def test_pending_statistics_are_refreshed(self) -> None:
         """Javob berilmagan bandning sotuvi o'sib borishi kerak."""
@@ -363,6 +369,62 @@ class TestExportUsesLocalDay:
         assert sorted(r["sku"] for r in kun) == ["boshi", "oxiri"]
 
 
+class TestCardHidesStaleItems:
+    """Karta faqat hozirgi ishni va o'tgan javoblarni ko'rsatadi.
+
+    Menejer ko'rgan holat: menyu tugmasi "(2 band)" der, karta esa uchtasini
+    ko'rsatardi — uchinchisi eski tekshiruvdan qolgan, hozirgi qoidaga
+    tushmaydigan band edi. Bunday qatorlar hech qachon o'z-o'zidan
+    yo'qolmasdi va vaqt o'tgan sari kartani chalkashtirardi.
+    """
+
+    async def _tekshiruv(self, *candidates) -> None:
+        run = await repo.next_run_id()
+        await repo.insert_candidates(list(candidates), run)
+        await repo.finish_run(run)
+
+    async def test_stale_unanswered_item_is_hidden(self, database) -> None:
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        kartada = [r["shop_id"] for r in await repo.card_items("1")]
+        assert kartada == ["s2"]
+
+    async def test_answered_item_stays_visible(self, database) -> None:
+        """Javob berilgani eski bo'lsa ham qoladi — menejer nima qilganini ko'rsin."""
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        row = (await repo.card_items("1"))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        kartada = {r["shop_id"]: r["status"] for r in await repo.card_items("1")}
+        assert kartada == {"s1": STATUS_TAKEN, "s2": STATUS_PENDING}
+
+    async def test_menu_count_matches_the_card(self, database) -> None:
+        """Menyudagi "(N band)" va kartadagi javob kutayotganlar soni bir xil."""
+        await self._tekshiruv(*[
+            make_candidate(sku="1", shop_id=f"s{i}", shop_name=f"F{i}") for i in range(3)
+        ])
+        await self._tekshiruv(*[
+            make_candidate(sku="1", shop_id=f"s{i}", shop_name=f"F{i}") for i in range(2)
+        ])
+        menyu = {r["sku"]: r["open_count"] for r in
+                 await repo.skus_with_open_counts("Poyasnaya", "Sharof M255")}
+        kartada = [r for r in await repo.card_items("1")
+                   if r["status"] == STATUS_PENDING]
+        assert menyu["1"] == len(kartada) == 2
+
+    async def test_row_survives_in_the_database(self, database) -> None:
+        """Yashirish o'chirish emas: oynani kengaytirgan tekshiruv qaytaradi."""
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        assert len(await repo.card_items("1")) == 1
+
+        await self._tekshiruv(
+            make_candidate(sku="1", shop_id="s1"),
+            make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"),
+        )
+        assert len(await repo.card_items("1")) == 2
+
+
 class TestSupersedeByNewArrival:
     """Sklad yangi partiya yuborsa eski band yopilishi kerak.
 
@@ -630,8 +692,10 @@ class TestMenuShowsOnlyTheLastRun:
         """Kengroq qoida bilan qayta tekshirilsa eski band qaytadi."""
         await self._run(make_candidate(sku="1"))
         await self._run(make_candidate(sku="2"))
-        assert {r["sku"] for r in await repo.card_items("1")} == {"1"}   # bazada bor
-        assert await repo.open_count() == 1                              # menyuda yo'q
+        # Bazada saqlanib qoldi, lekin kartada ham, menyuda ham chiqmaydi:
+        # raqamlari eskirgan, ular asosida qaror qabul qilib bo'lmaydi
+        assert await repo.card_items("1") == []
+        assert await repo.open_count() == 1
 
         await self._run(make_candidate(sku="1"), make_candidate(sku="2"))
         assert await repo.open_count() == 2                              # ikkalasi qaytdi

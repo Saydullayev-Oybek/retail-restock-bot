@@ -527,22 +527,30 @@ async def skus_with_open_counts(
 
 
 async def card_items(sku: str, detected_date: date | None = None) -> list[aiosqlite.Row]:
-    """4-daraja: artikulning barcha filial+rang bandlari (hal qilinganlari ham).
+    """4-daraja: artikulning kartada ko'rsatiladigan bandlari.
 
-    Hal qilinganlari ham ko'rsatiladi — menejer nima qilganini ko'rib turishi
-    va xato bosgan bo'lsa bilishi kerak.
+    Ikki xil qator chiqadi:
+
+    * OXIRGI tekshiruv topgan, hali hal qilinmaganlari — ish shu yerda;
+    * javob berilganlari — menejer nima qilganini ko'rib tursin va xato
+      bosgan bo'lsa qaytara olsin.
+
+    Eski tekshiruvdan qolgan, javobsiz bandlar CHIQMAYDI. Ularning raqamlari
+    o'sha paytdagi holat, va ular hech qachon o'z-o'zidan yo'qolmasdi —
+    vaqt o'tgan sari kartani chalkashtirardi. Bazadan o'chmaydi: oynani
+    kengaytirgan tekshiruv ularni qayta topsa, o'zi qaytadi.
+
+    Yon foydasi: menyudagi "(N band)" va kartadagi bandlar soni endi
+    har doim mos keladi.
     """
     where, params = _date_filter(detected_date)
     async with db().execute(
         f"""
-        -- `is_current` — band OXIRGI tekshiruvda topilganmi. Menyu faqat
-        -- shundaylarni sanaydi, karta esa hammasini ko'rsatadi; ikkisi
-        -- bir-biriga mos kelishi uchun karta farqni ko'rsatishi kerak.
-        SELECT *,
-               (last_run = (SELECT CAST(value AS INTEGER) FROM kv
-                            WHERE key = 'check_run_seq')) AS is_current
-        FROM candidate
+        SELECT * FROM candidate
         WHERE sku = ? {where}
+          AND (status <> '{STATUS_PENDING}'
+               OR last_run = (SELECT CAST(value AS INTEGER) FROM kv
+                              WHERE key = 'check_run_seq'))
         -- Javob berilmaganlar OLDINDA: karta sahifalanganda menejer kerakli
         -- bandlarni birinchi sahifada ko'radi, hal qilinganlari esa oxirida
         ORDER BY (status <> '{STATUS_PENDING}' OR superseded_at IS NOT NULL),

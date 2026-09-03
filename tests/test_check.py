@@ -658,7 +658,10 @@ class TestSupersedeInCheck:
         result = await check_service.run_check(gateway, make_settings(), today=TODAY)
         assert result.total_found == 1
         assert await repo.open_count() == 1          # ikkitasi emas
-        assert len(await repo.card_items("1")) == 2  # kartada ikkalasi ko'rinadi
+        # Kartada faqat YANGI partiya: eskisiga javob berilmagan va u oxirgi
+        # tekshiruvda topilmagan, ya'ni raqamlari eskirgan
+        kartada = await repo.card_items("1")
+        assert [r["arrived_date"] for r in kartada] == [TODAY.isoformat()]
 
 
 class TestWindowOverride:
@@ -735,8 +738,12 @@ class TestRunScopedMenu:
         assert result.total_found == 0
         assert await repo.open_count() == 0
 
-        # band bazada saqlanib qoldi
-        assert len(await repo.card_items("1")) == 1
+        # Band bazada saqlanib qoldi, lekin kartada ko'rinmaydi
+        assert await repo.card_items("1") == []
+        async with conn.db().execute(
+            "SELECT COUNT(*) AS n FROM candidate WHERE sku = '1'"
+        ) as cursor:
+            assert (await cursor.fetchone())["n"] == 1
 
     async def test_wider_rule_brings_items_back(self) -> None:
         settings = make_settings()

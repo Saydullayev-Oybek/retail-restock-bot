@@ -236,37 +236,19 @@ class TestUpdateCard:
         Ilgari 20 ta band caption chegarasidan oshib, rasm yo'qolardi.
         """
         await seed_rows(with_image=True)
+        # Bitta tekshiruvda: aks holda birinchi band eskirib kartadan chiqadi
         await repo.insert_candidates([
-            make_candidate(shop_id=f"s{i}", shop_name=f"FILIAL-{i}", color=f"Rang-{i}")
-            for i in range(20)
+            make_candidate(),
+            *[make_candidate(shop_id=f"s{i}", shop_name=f"FILIAL-{i}", color=f"Rang-{i}")
+              for i in range(20)],
         ])
         rows = await repo.card_items("39666", TODAY)
+        assert len(rows) == 21
         assert len(cards._caption(rows, 0, 0)) <= cards._CAPTION_LIMIT
 
         bot = FakeBot()
         await cards.send_card(bot, 1, rows, MARKUP)
         assert bot.names == ["send_photo"]
-
-    async def test_caption_fits_when_every_row_is_stale(self, no_download) -> None:
-        """Eng yomon holat: sahifadagi hamma band eski, har biri qo'shimcha qator.
-
-        "eski tekshiruvdan" belgisi caption'ni 1024 chegarasidan chiqarib
-        yuborsa, karta rasmini butunlay yo'qotadi.
-        """
-        await seed_rows(with_image=True)
-        await repo.insert_candidates([
-            make_candidate(shop_id=f"s{i}", shop_name=f"SHAXRISTON-FILIAL-{i}",
-                           color="Тёмно-синий/Коричневый")
-            for i in range(10)
-        ])
-        # Yangi tekshiruv ochib yopamiz — yuqoridagilar "eski" bo'lib qoladi
-        run = await repo.next_run_id()
-        await repo.finish_run(run)
-
-        rows = await repo.card_items("39666", TODAY)
-        assert all(not r["is_current"] for r in rows)
-        for page in range(3):
-            assert len(cards._caption(rows, page, 3)) <= cards._CAPTION_LIMIT
 
     async def test_not_modified_is_swallowed(self) -> None:
         """Bir tugmani ikki marta bosish xato bermasligi kerak."""
@@ -435,46 +417,6 @@ class TestCardPagination:
         kb = keyboards.card_kb(rows, 1, 1, sku_ref=1, page=0)
         labels = [b.text for row in kb.inline_keyboard for b in row]
         assert "◀️" not in labels and "▶️" not in labels
-
-
-class TestStaleRowHasNoAnswerButtons:
-    """Eski tekshiruvdan qolgan bandga javob tugmasi berilmasligi kerak.
-
-    Uning raqamlari o'sha paytdagi holat: menejer eskirgan ma'lumot asosida
-    buyurtma berib qo'yishi mumkin edi.
-    """
-
-    async def test_stale_row_gets_only_a_label(self, no_download) -> None:
-        from povtor_bot.bot import keyboards
-
-        await seed_rows(with_image=False)
-        run = await repo.next_run_id()
-        await repo.finish_run(run)      # mavjud band endi "eski"
-        rows = await repo.card_items("39666", TODAY)
-        assert not rows[0]["is_current"]
-
-        labels = [
-            b.text
-            for r in keyboards.card_kb(rows, 1, 1, sku_ref=1).inline_keyboard
-            for b in r
-        ]
-        assert any("eski tekshiruvdan" in x for x in labels)
-        assert not any("OLINDI" in x or "BOZORDA" in x for x in labels)
-
-    async def test_current_row_keeps_its_buttons(self, no_download) -> None:
-        from povtor_bot.bot import keyboards
-
-        await seed_rows(with_image=False)
-        rows = await repo.card_items("39666", TODAY)
-        assert rows[0]["is_current"]
-
-        labels = [
-            b.text
-            for r in keyboards.card_kb(rows, 1, 1, sku_ref=1).inline_keyboard
-            for b in r
-        ]
-        assert any("OLINDI" in x for x in labels)
-        assert any("BOZORDA" in x for x in labels)
 
 
 class TestSendFailureIsReported:
