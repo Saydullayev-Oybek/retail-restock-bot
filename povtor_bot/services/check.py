@@ -58,6 +58,16 @@ class CheckResult:
     new_count: int
     total_found: int
     stock_rows: int
+    # Filiallardagi qoldiq: dona va artikul soni (qator soni menejerga
+    # hech nima bermaydi — 16 148 qator = 92 289 dona bo'lib chiqadi)
+    stock_units: int = 0
+    stock_skus: int = 0
+    stock_age_hours: float | None = None
+    # Topilgan nomzodlarning taqsimoti — hisobotdagi raqamlar o'zaro
+    # to'g'ri kelishi uchun. Aks holda "121 topildi, menyuda 117" chiqadi
+    # va sabab ko'rinmaydi.
+    open_now: int = 0          # menyuda
+    already_answered: int = 0  # avval javob berilgan (OLINDI / BOZORDA YO'Q)
     usd_rate: float = 0.0
     transfer_rows: int = 0
     synced_skus: int = 0
@@ -377,10 +387,20 @@ async def _run_check(
         "Tekshiruv: %d nomzod topildi, %d tasi yangi (sotuv=%d, qoldiq=%d)",
         len(candidates), new_count, len(sales), len(stock),
     )
+    # Taqsimot: bu tekshiruv belgilagan qatorlar minus yangi partiya kelganlari
+    # = menyudagilar; qolgani esa avval javob berilgan bandlar (ular
+    # `insert_candidates` da tegilmaydi, `last_run` i ham yangilanmaydi).
+    belgilangan, yopiq = await repo.run_counts(run_id)
+    dona, artikullar = await repo.stock_summary()
     return CheckResult(
         new_count=new_count,
         total_found=len(candidates),
         stock_rows=len(stock) if refresh_stock else await repo.stock_snapshot_rows(),
+        stock_units=dona,
+        stock_skus=artikullar,
+        stock_age_hours=0.0 if refresh_stock else stock_age,
+        open_now=belgilangan - yopiq,
+        already_answered=max(0, len(candidates) - belgilangan),
         usd_rate=usd_rate,
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,

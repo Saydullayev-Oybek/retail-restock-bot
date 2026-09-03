@@ -231,6 +231,46 @@ class TestCheckReport:
         text = texts.check_report(self.Result(total_found=5, new_count=0))
         assert "Yangi nomzod yo'q" in text
 
+    def test_numbers_add_up(self) -> None:
+        """Topilgan = menyuda + yangi partiya + javob berilgan.
+
+        Menejer uch marta "nega 121 topildi, menyuda 117?" deb so'radi —
+        hisobot sababni o'zi ko'rsatishi kerak.
+        """
+        text = texts.check_report(self.Result(
+            total_found=121, new_count=1,
+            open_now=117, superseded=2, already_answered=2,
+        ))
+        assert "Topilgan nomzodlar: <b>121</b>" in text
+        assert "menyuda: <b>117</b>" in text
+        assert "yangi partiya keldi: <b>2</b>" in text
+        assert "javob bergansiz: <b>2</b>" in text
+
+    def test_zero_lines_are_hidden(self) -> None:
+        """Hech nima yopilmagan kunda ortiqcha qator chiqmasin."""
+        text = texts.check_report(self.Result(total_found=40, new_count=4, open_now=40))
+        assert "menyuda: <b>40</b>" in text
+        assert "yangi partiya" not in text and "javob bergansiz" not in text
+
+    def test_stock_is_shown_in_units_not_rows(self) -> None:
+        """16 148 qator = 92 289 dona — menejer birinchisini tovar soni deb o'qidi."""
+        text = texts.check_report(self.Result(
+            stock_rows=16148, stock_units=92289, stock_skus=5196, stock_age_hours=0.0
+        ))
+        assert "92 289</b> dona · 5 196 artikul (yangilandi)" in text
+        assert "16148" not in text
+
+    def test_stale_stock_says_how_old(self) -> None:
+        text = texts.check_report(self.Result(
+            stock_rows=16148, stock_units=92289, stock_skus=5196, stock_age_hours=7.6
+        ))
+        assert "8 soat oldingi" in text
+
+    def test_falls_back_to_row_count_without_summary(self) -> None:
+        """Eski natija obyektida yangi maydonlar bo'lmasligi mumkin."""
+        text = texts.check_report(self.Result(stock_rows=900))
+        assert "Qoldiq qatorlari: 900" in text
+
 
 class TestAgeLabel:
     """Bandning yoshi.

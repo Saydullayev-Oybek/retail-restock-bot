@@ -230,21 +230,40 @@ def transfer_hint_text(rows: list[Any]) -> str:
 def check_report(result: Any, *, days: int = 0, percent: int = 0) -> str:
     if not result.ok:
         return f"⚠️ Tekshiruv bajarilmadi.\n<code>{esc(result.error)}</code>"
-    lines = [
-        "✅ <b>Tekshiruv tugadi</b>",
-        f"Topilgan nomzodlar: <b>{result.total_found}</b>",
-        f"Yangi qo'shildi: <b>{result.new_count}</b>",
-        f"Qoldiq qatorlari: {result.stock_rows}",
+    lines = ["✅ <b>Tekshiruv tugadi</b>",
+             f"Topilgan nomzodlar: <b>{result.total_found}</b>"]
+
+    # Topilgan hammasi menyuga tushmaydi: bir qismiga yangi partiya kelgan,
+    # bir qismiga menejer allaqachon javob bergan. Raqamlar o'zaro to'g'ri
+    # kelmasa "121 topildi, menyuda 117" degan savol har safar takrorlanadi.
+    taqsimot = [
+        ("menyuda", getattr(result, "open_now", 0)),
+        ("yangi partiya keldi", getattr(result, "superseded", 0)),
+        ("javob bergansiz", getattr(result, "already_answered", 0)),
     ]
+    taqsimot = [(nom, son) for nom, son in taqsimot if son]
+    for index, (nom, son) in enumerate(taqsimot):
+        belgi = "└" if index == len(taqsimot) - 1 else "├"
+        lines.append(f"   {belgi} {nom}: <b>{son}</b>")
+
+    lines.append(f"Yangi qo'shildi: <b>{result.new_count}</b>")
+
+    dona = getattr(result, "stock_units", 0)
+    if dona:
+        yosh = getattr(result, "stock_age_hours", None)
+        qachon = "yangilandi" if not yosh else f"{yosh:.0f} soat oldingi"
+        lines.append(
+            f"Filiallardagi qoldiq: <b>{dona:,}</b> dona · "
+            f"{getattr(result, 'stock_skus', 0):,} artikul ({qachon})".replace(",", " ")
+        )
+    elif result.stock_rows:
+        lines.append(f"Qoldiq qatorlari: {result.stock_rows}")
     if days and percent:
         # Menejer natijani QAYSI qoida bilan olganini eslay olishi kerak —
         # u har tekshiruvda boshqacha bo'lishi mumkin
         lines.append(f"<i>oyna {days} kun · chegara {percent}%</i>")
     if result.usd_rate:
         lines.append(f"USD kursi: {result.usd_rate:g}")
-    yopildi = getattr(result, "superseded", 0)
-    if yopildi:
-        lines.append(f"Yangi partiya keldi: <b>{yopildi}</b> band yopildi")
     ochildi = getattr(result, "reopened", 0)
     if ochildi:
         lines.append(

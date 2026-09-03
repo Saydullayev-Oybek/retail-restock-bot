@@ -822,6 +822,33 @@ async def stock_snapshot_rows() -> int:
         return (await cursor.fetchone())["n"]
 
 
+async def stock_summary() -> tuple[int, int]:
+    """Qoldiq snapshoti: (dona, artikul). Qator soni menejerga hech nima bermaydi."""
+    async with db().execute(
+        "SELECT COALESCE(SUM(quantity), 0) AS dona, "
+        "COUNT(DISTINCT sku) AS artikul FROM stock_snapshot"
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row["dona"]), int(row["artikul"])
+
+
+async def run_counts(run_id: int) -> tuple[int, int]:
+    """Shu tekshiruv belgilagan qatorlar: (jami, yangi partiya kelgani).
+
+    Javob berilgan qatorlar `insert_candidates` da tegilmaydi, ya'ni ularning
+    `last_run` i yangilanmaydi — shuning uchun bu yerga tushmaydi. Hisobotdagi
+    "javob bergansiz" soni shundan kelib chiqadi: topilgan - shu yerdagi jami.
+    """
+    async with db().execute(
+        "SELECT COUNT(*) AS jami, "
+        "COALESCE(SUM(superseded_at IS NOT NULL), 0) AS yopilgan "
+        "FROM candidate WHERE last_run = ?",
+        (run_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row["jami"]), int(row["yopilgan"])
+
+
 async def stock_snapshot_age_hours() -> float | None:
     """Qoldiq snapshoti necha soat oldin yozilgan. Bo'sh bo'lsa None."""
     raw = await kv_get("stock_synced_at")
