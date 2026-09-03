@@ -433,6 +433,93 @@ class TestWindowDaysMigration:
         assert row["n"] == 1 and row["w"] == 5     # sukut qiymat
 
 
+class TestBrandMaterialMigration:
+    """`brand` va `material` mavjud bazalarga qo'shiladi, ma'lumot yo'qolmaydi."""
+
+    async def test_columns_are_added_and_rows_survive(self, tmp_path) -> None:
+        import sqlite3
+
+        from povtor_bot.db import conn
+
+        path = tmp_path / "eski.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.insert_candidates([make_candidate(sku="50058")])
+        await conn.close()
+
+        raw = sqlite3.connect(path)
+        for table in ("candidate", "product_cache", "product_variant"):
+            for column in ("brand", "material"):
+                raw.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        raw.commit()
+        raw.close()
+
+        await conn.connect(str(path))
+        try:
+            cols = {}
+            for table in ("candidate", "product_cache", "product_variant"):
+                async with conn.db().execute(f"PRAGMA table_info({table})") as cur:
+                    cols[table] = {r["name"] for r in await cur.fetchall()}
+            async with conn.db().execute(
+                "SELECT sku, brand, material FROM candidate"
+            ) as cur:
+                row = await cur.fetchone()
+        finally:
+            await conn.close()
+
+        for table in ("candidate", "product_cache", "product_variant"):
+            assert {"brand", "material"} <= cols[table], table
+        assert row["sku"] == "50058"
+        assert row["brand"] == "" and row["material"] == ""
+
+    async def test_stored_and_read_back(self, database) -> None:
+        await repo.insert_candidates(
+            [make_candidate(brand="Salvatini", material="Комбинация · Замш/Кожа")]
+        )
+        rows = await repo.card_items("39666")
+        assert rows[0]["brand"] == "Salvatini"
+        assert rows[0]["material"] == "Комбинация · Замш/Кожа"
+
+
+class TestImageResyncDataMigration:
+    """Rasm manzili to'liq URL'ga o'tgani uchun artikullar bir marta qayta o'qiladi."""
+
+    async def test_sku_sync_cleared_once(self, tmp_path) -> None:
+        from povtor_bot.db import conn
+
+        path = tmp_path / "resync.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.mark_sku_synced("39666", 3)
+        assert await repo.stale_skus(["39666"], 7) == []
+        await conn.close()
+
+        # Belgini olib tashlaymiz — migratsiya hali bajarilmagan holat
+        async def _drop_flag() -> None:
+            await conn.db().execute(
+                "DELETE FROM kv WHERE key = 'resync_2026_09_full_image_url'"
+            )
+            await conn.db().commit()
+
+        await conn.connect(str(path))
+        await _drop_flag()
+        await conn.close()
+
+        await conn.connect(str(path))
+        try:
+            assert await repo.stale_skus(["39666"], 7) == ["39666"]
+            # Ikkinchi ulanishda takrorlanmaydi
+            await repo.mark_sku_synced("39666", 3)
+        finally:
+            await conn.close()
+
+        await conn.connect(str(path))
+        try:
+            assert await repo.stale_skus(["39666"], 7) == []
+        finally:
+            await conn.close()
+
+
 class TestMenuShowsOnlyTheLastRun:
     """Menyu OXIRGI tekshiruv natijasini ko'rsatadi.
 

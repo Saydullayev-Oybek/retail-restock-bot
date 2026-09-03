@@ -126,6 +126,7 @@ async def sync_variants(
                 {
                     "product_id": v.product_id, "sku": v.sku, "color": v.color,
                     "subcategory": v.subcategory, "kind": v.kind,
+                    "brand": v.brand, "material": v.material,
                     "supplier": v.supplier, "product_name": v.name,
                     "category_group": v.category_group, "image_file": v.image_file,
                 }
@@ -170,6 +171,7 @@ def _product_index(variants: Mapping[str, Any]) -> dict[tuple[str, str], Product
             sku=row["sku"], color=row["color"], product_id=row["product_id"],
             name=row["product_name"], category_group=row["category_group"],
             subcategory=row["subcategory"], kind=row["kind"],
+            brand=row["brand"], material=row["material"],
             supplier=row["supplier"], image_file=row["image_file"],
         )
         # Rasmi/nomi to'liqrog'i qoladi
@@ -278,6 +280,7 @@ async def _run_check(
             "sku": info.sku, "color": info.color, "product_id": info.product_id,
             "product_name": info.name, "category_group": info.category_group,
             "subcategory": info.subcategory, "kind": info.kind,
+            "brand": info.brand, "material": info.material,
             "supplier": info.supplier, "image_url": info.image_file,
             "supply_price": info.supply_price, "supply_currency": info.supply_currency,
         }

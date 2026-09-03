@@ -211,9 +211,10 @@ marta yuklab olinib Telegram'ga yuboriladi, qaytgan `file_id` `product_cache`ga
 yoziladi va undan keyin faqat shu ishlatiladi. Rasm topilmasa `image_missing=1`
 qo'yiladi — qayta urinilmaydi.
 
-Billz `main_image_url` da faqat fayl nomini beradi, shuning uchun
-`BILLZ_IMAGE_BASE_URL` sozlanmaguncha kartalar **matn ko'rinishida** chiqadi.
-Qolgan hamma narsa (nom, artikul, rang, tannarx, tavsiya, tugmalar) ishlaydi.
+Manzil `/v2/products` javobidagi **`main_image_url_full`** dan olinadi — u
+allaqachon to'liq URL va hech qanday sozlama talab qilmaydi. `BILLZ_IMAGE_BASE_URL`
+faqat zaxira bo'lib qoldi (namunada 300 tovardan 265 tasida to'liq manzil bor;
+qolganlarida rasm umuman yo'q).
 
 **Rasm ↔ matn almashinuvi.** Telegram matnli xabarni rasmli xabarga tahrirlay
 olmaydi. `card_msg` jadvali oxirgi kartaning turini eslab qoladi; tur o'zgarsa
@@ -262,9 +263,11 @@ mumkin — probe'ni birinchi bo'lib ishlating.
 |---|---|---|
 | **Rang** | `product_attributes[]` | `custom_fields` → **`"Цвет"`**. `product_attributes` hamma joyda bo'sh |
 | **Podkategoriya / Tur** | `level_2` | `custom_fields` → `"Подкатегория"` / `"Вид"` |
+| **Material** | — | `custom_fields` → `"Материал"`; `"Комбинация"` ni `"Описание"` ochadi (`Замш/Кожа`) |
 | **Sotuv javobi kaliti** | `rows` | `products_stats_by_date` |
 | **Tannarx** | `/v2/products` → `supply_price` | U yerda **0**. Ishonchlisi transferdagi `sum_supply_price / sent_quantity` (u `display_currency=UZS` bilan so'raladi) |
-| **Rasm** | to'liq URL | faqat fayl nomi (`<uuid>.jpg`) — `BILLZ_IMAGE_BASE_URL` kerak |
+| **Rasm** | `main_image_url` | u faqat fayl nomi (`<uuid>.jpg`); yonidagi **`main_image_url_full`** to'liq manzil beradi |
+| **Tovar nomi** | model nomi | tur nomi: 956 artikulga atigi **84 xil nom** (`Кеды-Casual` ni 33 ta artikul baham ko'radi). Modelni ajratadigan maydon — **`brand_name`** |
 | **Kategoriya nomlari** | — | **kirill**: `Поясные одежды`, `Плечевые одежды`, `Верхняя одежда`, `Обувь` |
 
 Yana ikkita muhim nuqta:

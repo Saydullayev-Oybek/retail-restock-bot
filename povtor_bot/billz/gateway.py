@@ -28,6 +28,11 @@ log = logging.getLogger(__name__)
 COLOR_FIELD_NAMES = ("цвет", "color", "rang", "tus")
 SUBCATEGORY_FIELD_NAMES = ("подкатегория", "subcategory", "podkategoriya")
 KIND_FIELD_NAMES = ("вид", "kind", "tur")
+MATERIAL_FIELD_NAMES = ("материал", "material")
+# "Описание" — material emas, tafsilot maydoni: "Замш/Кожа" ham, "Пуговица",
+# "Молния", "Манжет" ham uchraydi (300 tovarlik namunada 93 tasida to'lgan).
+# Aynan shu maydon "Комбинация" degan noaniq materialni ochib beradi.
+DETAIL_FIELD_NAMES = ("описание", "description", "tavsif")
 
 # Billz hisobot dvigateli vaqtni QATOR soniga emas, HAR SO'ROVGA sarflaydi:
 # o'lchovda 500 qator 4.2s, 2000 qator 3.3s keldi. Shuning uchun sahifa
@@ -495,6 +500,8 @@ def _product_info(row: dict[str, Any]) -> ProductInfo | None:
         # Podkategoriya custom_fields da; level_2 zaxira sifatida qoladi
         subcategory=custom_field(row, SUBCATEGORY_FIELD_NAMES) or sub_from_levels,
         kind=custom_field(row, KIND_FIELD_NAMES),
+        brand=str(_pick(row, "brand_name", "brand")).strip(),
+        material=_material(row),
         supplier=_first_supplier(row),
         image_file=_main_image(row),
         supply_price=supply_price,
@@ -503,8 +510,28 @@ def _product_info(row: dict[str, Any]) -> ProductInfo | None:
     )
 
 
+def _material(row: dict[str, Any]) -> str:
+    """Material matni: "Материал" + tafsilot.
+
+    Yolg'iz "Материал" ko'pincha yetarli emas — "Комбинация" nimaning
+    kombinatsiyasi ekanini aytmaydi. Tafsilot maydoni ("Описание") aynan shuni
+    ochadi: "Комбинация · Замш/Кожа". Ikkalasi ham bo'sh bo'lishi mumkin.
+    """
+    material = custom_field(row, MATERIAL_FIELD_NAMES)
+    detail = custom_field(row, DETAIL_FIELD_NAMES)
+    if detail and detail != material:
+        return f"{material} · {detail}" if material else detail
+    return material
+
+
 def _main_image(row: dict[str, Any]) -> str:
-    url = str(_pick(row, "main_image_url")).strip()
+    """Rasm manzili. To'liq URL ustunroq — u hech qanday sozlama talab qilmaydi.
+
+    Billz `main_image_url` da faqat fayl nomini beradi ("<uuid>.jpg"), lekin
+    yonida `main_image_url_full` ni ham qaytaradi (namunada 265/300 to'lgan).
+    Shu sababli BILLZ_IMAGE_BASE_URL sozlamasi amalda kerak emas.
+    """
+    url = str(_pick(row, "main_image_url_full", "main_image_url")).strip()
     if url:
         return url
     photos = row.get("photos")
@@ -512,10 +539,12 @@ def _main_image(row: dict[str, Any]) -> str:
         # is_main belgilangani ustunroq, bo'lmasa birinchisi
         for photo in photos:
             if isinstance(photo, dict) and photo.get("is_main"):
-                return str(photo.get("photo_url", "")).strip()
+                return str(_pick(photo, "photo_url_full", "photo_url")).strip()
         for photo in photos:
-            if isinstance(photo, dict) and photo.get("photo_url"):
-                return str(photo["photo_url"]).strip()
+            if isinstance(photo, dict):
+                url = str(_pick(photo, "photo_url_full", "photo_url")).strip()
+                if url:
+                    return url
     return ""
 
 

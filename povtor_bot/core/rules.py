@@ -311,6 +311,8 @@ def detect_candidates(
                 subcategory=info.subcategory if info else "",
                 kind=info.kind if info else "",
                 product_name=(info.name if info else "") or head.product_name,
+                brand=info.brand if info else "",
+                material=info.material if info else "",
                 supplier=(info.supplier if info else "") or head.supplier,
                 product_id=(info.product_id if info else "") or head.product_id,
                 image_url=info.image_file if info else "",

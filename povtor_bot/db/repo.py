@@ -81,7 +81,8 @@ async def cache_products(rows: Iterable[dict[str, Any]]) -> int:
         (
             row["sku"], row.get("color", ""), row.get("product_id", ""),
             row.get("product_name", ""), row.get("category_group", ""),
-            row.get("subcategory", ""), row.get("kind", ""), row.get("supplier", ""),
+            row.get("subcategory", ""), row.get("kind", ""),
+            row.get("brand", ""), row.get("material", ""), row.get("supplier", ""),
             row.get("image_url", ""), float(row.get("supply_price", 0) or 0),
             row.get("supply_currency", "UZS") or "UZS",
         )
@@ -94,14 +95,17 @@ async def cache_products(rows: Iterable[dict[str, Any]]) -> int:
             """
             INSERT INTO product_cache
                 (sku, color, product_id, product_name, category_group, subcategory,
-                 kind, supplier, image_url, supply_price, supply_currency, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 kind, brand, material, supplier, image_url, supply_price,
+                 supply_currency, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT (sku, color) DO UPDATE SET
                 product_id      = excluded.product_id,
                 product_name    = excluded.product_name,
                 category_group  = excluded.category_group,
                 subcategory     = excluded.subcategory,
                 kind            = excluded.kind,
+                brand           = excluded.brand,
+                material        = excluded.material,
                 supplier        = excluded.supplier,
                 -- yangi manzil bo'sh bo'lsa eskisi saqlanadi
                 image_url       = CASE WHEN excluded.image_url <> ''
@@ -183,7 +187,8 @@ async def save_variants(rows: Sequence[dict[str, Any]]) -> int:
     payload = [
         (
             row["product_id"], row["sku"], row.get("color", ""),
-            row.get("subcategory", ""), row.get("kind", ""), row.get("supplier", ""),
+            row.get("subcategory", ""), row.get("kind", ""),
+            row.get("brand", ""), row.get("material", ""), row.get("supplier", ""),
             row.get("product_name", ""), row.get("category_group", ""),
             row.get("image_file", ""),
         )
@@ -196,12 +201,13 @@ async def save_variants(rows: Sequence[dict[str, Any]]) -> int:
         await db().executemany(
             """
             INSERT INTO product_variant
-                (product_id, sku, color, subcategory, kind, supplier,
-                 product_name, category_group, image_file, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                (product_id, sku, color, subcategory, kind, brand, material,
+                 supplier, product_name, category_group, image_file, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT (product_id) DO UPDATE SET
                 sku = excluded.sku, color = excluded.color,
                 subcategory = excluded.subcategory, kind = excluded.kind,
+                brand = excluded.brand, material = excluded.material,
                 supplier = excluded.supplier, product_name = excluded.product_name,
                 category_group = excluded.category_group,
                 image_file = CASE WHEN excluded.image_file <> ''
@@ -269,9 +275,9 @@ async def mark_sku_synced(sku: str, variants: int) -> None:
 
 _CANDIDATE_COLUMNS = (
     "detected_date, shop_id, shop_name, category_group, subcategory, kind, product_name, "
-    "sku, color, supplier, product_id, image_url, supply_price, supply_currency, "
-    "price_uzs, base_qty, sold_qty, percent, days_to_50, grade, recommended_qty, "
-    "note, arrived_date, window_days, last_run"
+    "brand, material, sku, color, supplier, product_id, image_url, supply_price, "
+    "supply_currency, price_uzs, base_qty, sold_qty, percent, days_to_50, grade, "
+    "recommended_qty, note, arrived_date, window_days, last_run"
 )
 
 
@@ -332,14 +338,14 @@ async def insert_candidates(
     payload = [
         (
             c.detected_date.isoformat(), c.shop_id, c.shop_name, c.category_group,
-            c.subcategory, c.kind, c.product_name, c.sku, c.color, c.supplier, c.product_id,
-            c.image_url, c.supply_price, c.supply_currency, c.price_uzs, c.base_qty,
-            c.sold_qty, c.percent, c.days_to_50, c.grade, c.recommended_qty,
-            c.note, c.arrived_date.isoformat(), c.window_days, run_id,
+            c.subcategory, c.kind, c.product_name, c.brand, c.material, c.sku, c.color,
+            c.supplier, c.product_id, c.image_url, c.supply_price, c.supply_currency,
+            c.price_uzs, c.base_qty, c.sold_qty, c.percent, c.days_to_50, c.grade,
+            c.recommended_qty, c.note, c.arrived_date.isoformat(), c.window_days, run_id,
         )
         for c in candidates
     ]
-    placeholders = ", ".join(["?"] * 25)
+    placeholders = ", ".join(["?"] * len(_CANDIDATE_COLUMNS.split(",")))
     async with write_lock():
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         before = (await cursor.fetchone())["n"]
@@ -356,6 +362,8 @@ async def insert_candidates(
                 note            = excluded.note,
                 price_uzs       = excluded.price_uzs,
                 product_name    = excluded.product_name,
+                brand           = excluded.brand,
+                material        = excluded.material,
                 image_url       = excluded.image_url,
                 window_days     = excluded.window_days,
                 last_run        = excluded.last_run

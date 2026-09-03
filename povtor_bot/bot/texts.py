@@ -97,6 +97,15 @@ def age_label(
     return "kecha" if days == 1 else f"{days} kun oldin"
 
 
+def _row_get(row: Any, key: str, fallback: str = "") -> str:
+    """Ixtiyoriy ustun. Migratsiyagacha yozilgan qatorlarda u bo'lmasligi mumkin."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return fallback
+    return str(value).strip() if value else fallback
+
+
 def _row_window(row: Any, fallback: int) -> int:
     """Bandni topgan oyna. Eski qatorlarda ustun bo'lmasligi mumkin."""
     try:
@@ -120,12 +129,23 @@ def card_caption(
 
     head = rows[0]
     shown = rows if visible is None else visible
+
+    # Sarlavhaga brend qo'shiladi. Sababi: Billz'da `product_name` model nomi
+    # emas, tur nomi — "Кеды-Casual" ni 33 ta artikul baham ko'radi. Brendsiz
+    # ikkita butunlay boshqa model kartada bir xil ko'rinadi.
+    nomi = esc(head["product_name"] or "Nomsiz tovar")
+    brend = esc(_row_get(head, "brand"))
     lines = [
-        f"<b>{esc(head['product_name'] or 'Nomsiz tovar')}</b>",
+        f"<b>{nomi}{f' · {brend}' if brend else ''}</b>",
         f"Artikul: <code>{esc(head['sku'])}</code>",
     ]
-    if head["subcategory"]:
+    # Podkategoriya ko'pincha nom bilan aynan bir xil ("Кеды-Casual") —
+    # takrorlash foydasiz, faqat farq qilganda ko'rsatamiz
+    if head["subcategory"] and head["subcategory"] != head["product_name"]:
         lines.append(f"Bo'lim: {esc(head['subcategory'])}")
+    tafsilot = [esc(x) for x in (_row_get(head, "kind"), _row_get(head, "material")) if x]
+    if tafsilot:
+        lines.append(f"Tur: {' · '.join(tafsilot)}")
     if head["supplier"]:
         lines.append(f"Ta'minotchi: {esc(head['supplier'])}")
     lines.append(f"Tannarx: <b>{esc(money(head['price_uzs']))}</b>")

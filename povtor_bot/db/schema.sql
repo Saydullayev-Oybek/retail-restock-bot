@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS candidate (
     subcategory       TEXT    NOT NULL DEFAULT '',  -- podkategoriya (Рубашка с дл/р...)
     kind              TEXT    NOT NULL DEFAULT '',  -- Вид / Tur (Однотонный, Полоска...)
     product_name      TEXT    NOT NULL DEFAULT '',
+    -- Brend va material: bu akkauntda product_name model nomi emas, tur nomi
+    -- ("Кеды-Casual" ni 33 ta artikul baham ko'radi). Ikki kartani matn bilan
+    -- ajratadigan yagona maydon — brend.
+    brand             TEXT    NOT NULL DEFAULT '',
+    material          TEXT    NOT NULL DEFAULT '',
     sku               TEXT    NOT NULL,          -- artikul
     color             TEXT    NOT NULL DEFAULT '',
     supplier          TEXT    NOT NULL DEFAULT '',
@@ -86,6 +91,8 @@ CREATE TABLE IF NOT EXISTS product_cache (
     category_group  TEXT NOT NULL DEFAULT '',
     subcategory     TEXT NOT NULL DEFAULT '',
     kind            TEXT NOT NULL DEFAULT '',
+    brand           TEXT NOT NULL DEFAULT '',
+    material        TEXT NOT NULL DEFAULT '',
     supplier        TEXT NOT NULL DEFAULT '',
     image_url       TEXT NOT NULL DEFAULT '',
     -- Billz CDN'dan to'g'ridan-to'g'ri ko'rsatish taqiqlangan, shuning uchun rasm
@@ -113,10 +120,12 @@ CREATE TABLE IF NOT EXISTS product_variant (
     color          TEXT NOT NULL DEFAULT '',
     subcategory    TEXT NOT NULL DEFAULT '',
     kind           TEXT NOT NULL DEFAULT '',
+    brand          TEXT NOT NULL DEFAULT '',
+    material       TEXT NOT NULL DEFAULT '',
     supplier       TEXT NOT NULL DEFAULT '',
     product_name   TEXT NOT NULL DEFAULT '',
     category_group TEXT NOT NULL DEFAULT '',
-    image_file     TEXT NOT NULL DEFAULT '',   -- Billz faqat fayl nomini beradi
+    image_file     TEXT NOT NULL DEFAULT '',   -- to'liq URL (main_image_url_full)
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_variant_sku ON product_variant (sku, color);

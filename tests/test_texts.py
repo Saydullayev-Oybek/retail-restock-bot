@@ -26,10 +26,80 @@ def row(**overrides) -> dict:
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
         "days_to_50": 2, "superseded_at": None, "window_days": 5,
+        "kind": "Однотонный", "brand": "Millionaire", "material": "Хлопок",
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)
     return base
+
+
+class TestCardHeader:
+    """Sarlavha ikkita bir xil nomli artikulni ajrata olishi kerak.
+
+    Billz'da `product_name` model nomi emas, tur nomi: 956 artikulga atigi
+    84 xil nom to'g'ri keladi. Brendsiz Salvatini va Loro Piana kedilari
+    kartada bir xil ko'rinardi.
+    """
+
+    def test_brand_follows_the_name(self) -> None:
+        text = texts.card_caption(
+            [row(product_name="Кеды-Casual", brand="Salvatini")], today=TODAY
+        )
+        assert "Кеды-Casual · Salvatini" in text
+
+    def test_two_articles_differ_by_brand(self) -> None:
+        bittasi = texts.card_caption(
+            [row(sku="50058", product_name="Кеды-Casual", brand="Salvatini")], today=TODAY
+        )
+        boshqasi = texts.card_caption(
+            [row(sku="50051", product_name="Кеды-Casual", brand="Loro Piana")], today=TODAY
+        )
+        assert bittasi.splitlines()[0] != boshqasi.splitlines()[0]
+
+    def test_no_brand_leaves_the_name_alone(self) -> None:
+        text = texts.card_caption([row(product_name="Кеды-Casual", brand="")], today=TODAY)
+        assert "<b>Кеды-Casual</b>" in text
+
+    def test_kind_and_material_line(self) -> None:
+        text = texts.card_caption(
+            [row(kind="Шнурок", material="Комбинация · Замш/Кожа")], today=TODAY
+        )
+        assert "Tur: Шнурок · Комбинация · Замш/Кожа" in text
+
+    def test_kind_alone(self) -> None:
+        text = texts.card_caption([row(kind="Шнурок", material="")], today=TODAY)
+        assert "Tur: Шнурок" in text
+
+    def test_no_kind_no_material_no_line(self) -> None:
+        text = texts.card_caption([row(kind="", material="")], today=TODAY)
+        assert "Tur:" not in text
+
+    def test_subcategory_equal_to_name_is_dropped(self) -> None:
+        """Podkategoriya nom bilan aynan bir xil bo'lsa takrorlash foydasiz."""
+        text = texts.card_caption(
+            [row(product_name="Кеды-Casual", subcategory="Кеды-Casual")], today=TODAY
+        )
+        assert "Bo'lim:" not in text
+
+    def test_subcategory_shown_when_it_differs(self) -> None:
+        text = texts.card_caption(
+            [row(product_name="Рубашка класс.дл/р", subcategory="Рубашка с дл/р")],
+            today=TODAY,
+        )
+        assert "Bo'lim: Рубашка с дл/р" in text
+
+    def test_missing_columns_do_not_break_old_rows(self) -> None:
+        """Migratsiyagacha yozilgan qatorlarda brand/material ustuni yo'q."""
+        eski = row()
+        eski.pop("brand", None)
+        eski.pop("material", None)
+        eski.pop("kind", None)
+        text = texts.card_caption([eski], today=TODAY)
+        assert "39666" in text and "Tur:" not in text
+
+    def test_brand_is_escaped(self) -> None:
+        text = texts.card_caption([row(brand="A & B")], today=TODAY)
+        assert "A &amp; B" in text
 
 
 class TestEscaping:

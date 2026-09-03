@@ -142,8 +142,28 @@ class TestProductInfoMapping:
         assert info.kind == "Однотонный"
         assert info.category_group == "Плечевые одежды"
         assert info.supplier == "Sharof M255"
-        # Billz faqat fayl nomini beradi — to'liq manzil emas
+        # main_image_url_full yo'q — fayl nomiga tushadi
         assert info.image_file == "9633672a-69d8-4663-8ffa-bcb9d3e90a34.jpg"
+
+    def test_brand_and_material(self) -> None:
+        """Brend va material — ikkita bir xil nomli artikulni ajratadigan yagona matn."""
+        row = {
+            **self.ROW,
+            "brand_name": "Salvatini",
+            "custom_fields": [
+                *self.ROW["custom_fields"],
+                {"custom_field_name": "Материал", "custom_field_value": "Комбинация"},
+                {"custom_field_name": "Описание", "custom_field_value": "Замш/Кожа"},
+            ],
+        }
+        info = gw._product_info(row)
+        assert info is not None
+        assert info.brand == "Salvatini"
+        assert info.material == "Комбинация · Замш/Кожа"
+
+    def test_brand_and_material_absent(self) -> None:
+        info = gw._product_info(self.ROW)
+        assert info is not None and info.brand == "" and info.material == ""
 
     def test_zero_supply_price_is_not_invented(self) -> None:
         """Bu akkauntda /v2/products dagi supply_price 0 — o'ylab topmaymiz."""
@@ -172,7 +192,49 @@ class TestCategoryLevels:
         assert gw.category_levels({}) == ("", "")
 
 
+class TestMaterial:
+    """`Материал` yolg'iz yetarli emas: "Комбинация" nimaligini aytmaydi."""
+
+    @staticmethod
+    def _row(material: str = "", detail: str = "") -> dict:
+        return {"custom_fields": [
+            {"custom_field_name": "Материал", "custom_field_value": material},
+            {"custom_field_name": "Описание", "custom_field_value": detail},
+        ]}
+
+    def test_both_present_are_joined(self) -> None:
+        assert gw._material(self._row("Комбинация", "Замш/Кожа")) == "Комбинация · Замш/Кожа"
+
+    def test_only_material(self) -> None:
+        assert gw._material(self._row("Кожа")) == "Кожа"
+
+    def test_only_detail(self) -> None:
+        assert gw._material(self._row("", "Пуговица")) == "Пуговица"
+
+    def test_identical_values_not_duplicated(self) -> None:
+        assert gw._material(self._row("Кожа", "Кожа")) == "Кожа"
+
+    def test_neither(self) -> None:
+        assert gw._material({}) == ""
+
+
 class TestProductHelpers:
+    def test_main_image_prefers_full_url(self) -> None:
+        """To'liq manzil ustun: u BILLZ_IMAGE_BASE_URL sozlamasini keraksiz qiladi."""
+        row = {
+            "main_image_url": "x.jpg",
+            "main_image_url_full": "https://cdn.example/bucket/x.jpg",
+        }
+        assert gw._main_image(row) == "https://cdn.example/bucket/x.jpg"
+
+    def test_main_image_falls_back_to_file_name(self) -> None:
+        assert gw._main_image({"main_image_url": "x.jpg"}) == "x.jpg"
+
+    def test_photo_full_url_wins(self) -> None:
+        row = {"photos": [{"photo_url": "1.jpg", "photo_url_full": "https://cdn/1.jpg",
+                           "is_main": True}]}
+        assert gw._main_image(row) == "https://cdn/1.jpg"
+
     def test_main_image_prefers_explicit_url(self) -> None:
         assert gw._main_image({"main_image_url": "https://cdn/x.jpg"}) == "https://cdn/x.jpg"
 
