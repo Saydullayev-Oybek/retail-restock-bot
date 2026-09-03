@@ -366,7 +366,13 @@ async def insert_candidates(
                 material        = excluded.material,
                 image_url       = excluded.image_url,
                 window_days     = excluded.window_days,
-                last_run        = excluded.last_run
+                last_run        = excluded.last_run,
+                -- Tekshiruv bu bandni AYNAN OXIRGI partiya sifatida topdi
+                -- (detect_candidates har kalit uchun faqat eng oxirgi
+                -- haqiqiy kelishni chiqaradi) — demak undan yangirog'i yo'q
+                -- va band yopiq turmasligi kerak. Belgi latch emas, har
+                -- tekshiruvda qayta hisoblanadi.
+                superseded_at   = NULL
             WHERE candidate.status = '{STATUS_PENDING}'
             """,
             payload,

@@ -456,6 +456,96 @@ class TestSupersedeInCheck:
         assert result.superseded == 1
         assert await repo.open_count() == 0
 
+    async def test_empty_transfer_is_not_a_new_batch(self) -> None:
+        """0 DONALIK transfer qatori "yangi partiya keldi" degani EMAS.
+
+        Billz hisobotida bo'sh transfer qatorlari ko'p (o'lchovda skladdan
+        filialga 1475 qatordan 383 tasi = 26%). Ular hech nima yubormaydi,
+        lekin sana bo'yicha eng yangisi bo'lib chiqadi va bandni menyudan
+        noto'g'ri o'chirib yuboradi — tovar esa filialda tugab turgan bo'ladi.
+
+        detect_candidates bunday qatorlarni allaqachon chetlab o'tadi;
+        yangi partiya tekshiruvi ham xuddi shunday qilishi kerak.
+        """
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=4), base_qty=6, sold_qty=5,
+            percent=83.3, days_to_50=1, grade="ishonchli", recommended_qty=10,
+            note="83.3% sotildi", category_group="Poyasnaya",
+        )])
+        assert await repo.open_count() == 1
+
+        gateway = FakeGateway(
+            transfers=[
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=4), 6),
+                a_transfer("shop1", "1", "Белый", TODAY, 0),   # bo'sh qator
+            ],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+
+        assert result.superseded == 0, "bo'sh qator bandni yopmasligi kerak"
+        assert await repo.open_count() == 1, "band menyuda qolishi kerak"
+
+    async def test_real_batch_after_an_empty_row_still_closes(self) -> None:
+        """Bo'sh qator bordan keyin HAQIQIY partiya kelsa — band baribir yopiladi."""
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=4), base_qty=6, sold_qty=5,
+            percent=83.3, days_to_50=1, grade="ishonchli", recommended_qty=10,
+            note="x", category_group="Poyasnaya",
+        )])
+        gateway = FakeGateway(
+            transfers=[
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=4), 6),
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 0),
+                a_transfer("shop1", "1", "Белый", TODAY, 8),   # haqiqiy partiya
+            ],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert result.superseded == 1
+
+    async def test_wrongly_closed_candidate_reopens(self) -> None:
+        """Xato yopilgan band keyingi tekshiruvda O'ZI qaytadi.
+
+        `superseded_at` chiqarilgan holat: uni "yopilgan" deb qoldirib
+        ketish emas, har tekshiruvda qayta hisoblash to'g'ri. Agar tekshiruv
+        bandni AYNAN OXIRGI partiya sifatida topgan bo'lsa, undan yangirog'i
+        yo'q degani — demak u yopiq turmasligi kerak.
+        """
+        from povtor_bot.core.models import Candidate
+
+        kelgan = TODAY - timedelta(days=4)
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=kelgan, base_qty=6, sold_qty=5, percent=83.3,
+            days_to_50=1, grade="ishonchli", recommended_qty=10, note="x",
+            category_group="Poyasnaya",
+        )])
+        # Bo'sh qator tufayli xato yopilgan holatni yasaymiz
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "1", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.open_count() == 0
+
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", kelgan, 6)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert await repo.open_count() == 1
+
     async def test_both_batches_do_not_stack_up(self) -> None:
         """Yangi partiya ham nomzod bo'lsa, menyuda BITTA band qolishi kerak."""
         from povtor_bot.core.models import Candidate

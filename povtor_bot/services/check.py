@@ -161,6 +161,30 @@ def _apply_color(rows: Sequence[_Row], variants: Mapping[str, Any]) -> list[_Row
     return result
 
 
+def _latest_arrivals(
+    transfers: Sequence[TransferRow],
+) -> dict[tuple[str, str, str], date]:
+    """(filial, artikul, rang) -> skladdan OXIRGI HAQIQIY kelgan sana.
+
+    0 donalik qatorlar chetlab o'tiladi. Billz hisobotida ular ko'p —
+    o'lchovda skladdan filialga 1475 qatordan 383 tasi (26%) bo'sh chiqdi.
+    Bunday qator hech nima yubormaydi, lekin sanasi eng yangi bo'lgani uchun
+    bandni "yangi partiya keldi" deb yopib qo'yardi: menejer tovar tugab
+    turganini ko'rmay qolardi.
+
+    detect_candidates ham aynan shu filtrni qo'llaydi (`quantity <= 0` ->
+    o'tkazib yuborish), shuning uchun ikkala tomon bir xil sanani ko'radi.
+    """
+    oxirgi: dict[tuple[str, str, str], date] = {}
+    for row in transfers:
+        if row.quantity <= 0:
+            continue
+        key = (row.to_shop_id, row.sku, row.color)
+        if key not in oxirgi or row.arrived_date > oxirgi[key]:
+            oxirgi[key] = row.arrived_date
+    return oxirgi
+
+
 def _product_index(variants: Mapping[str, Any]) -> dict[tuple[str, str], ProductInfo]:
     """(sku, color) -> ProductInfo. Bir kalitga bir nechta variatsiya tushadi."""
     index: dict[tuple[str, str], ProductInfo] = {}
@@ -317,11 +341,7 @@ async def _run_check(
     # Yangi partiya kelgan bandlarni yopamiz. Bu nomzod HISOBLASHDAN
     # mustaqil: sklad tovar yuborgan bo'lsa ehtiyoj qondirilgan, hatto yangi
     # partiya qoidaga tushmasa ham (masalan hali hech nima sotilmagan).
-    oxirgi: dict[tuple[str, str, str], date] = {}
-    for row in colored_transfers:
-        key = (row.to_shop_id, row.sku, row.color)
-        if key not in oxirgi or row.arrived_date > oxirgi[key]:
-            oxirgi[key] = row.arrived_date
+    oxirgi = _latest_arrivals(colored_transfers)
     yopildi = await repo.supersede_by_new_arrivals(
         [(shop, sku, color, kun.isoformat())
          for (shop, sku, color), kun in oxirgi.items()]
