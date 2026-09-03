@@ -97,6 +97,15 @@ def age_label(
     return "kecha" if days == 1 else f"{days} kun oldin"
 
 
+def _is_current(row: Any) -> bool:
+    """Band oxirgi tekshiruvda topilganmi. Ustun bo'lmasa — topilgan deb olamiz."""
+    try:
+        value = row["is_current"]
+    except (KeyError, IndexError, TypeError):
+        return True
+    return bool(value)
+
+
 def _row_get(row: Any, key: str, fallback: str = "") -> str:
     """Ixtiyoriy ustun. Migratsiyagacha yozilgan qatorlarda u bo'lmasligi mumkin."""
     try:
@@ -158,7 +167,11 @@ def card_caption(
     lines.append("")
 
     for row in shown:
-        icon = STATUS_ICON.get(row["status"], "⚪️")
+        # Oxirgi tekshiruvda topilmagan band: raqamlari o'sha paytdagi holat.
+        # Menyu uni sanamaydi, shuning uchun karta ham farqni ko'rsatishi
+        # kerak — aks holda "2 band" deb yozib, 3 tasini ko'rsatadi.
+        eski = row["status"] == STATUS_PENDING and not _is_current(row)
+        icon = "⏸" if eski else STATUS_ICON.get(row["status"], "⚪️")
         shop = esc(row["shop_name"])
         color = f" · {esc(row['color'])}" if row["color"] else ""
         lines.append(f"{icon} <b>{shop}</b>{color} — <b>{row['recommended_qty']} dona</b>")
@@ -190,7 +203,9 @@ def card_caption(
         if row["status"] == STATUS_PENDING and _row_get(row, "reopened_at"):
             lines.append("    <i>🔁 avval bozorda yo'q edi</i>")
 
-        if row["status"] != STATUS_PENDING:
+        if eski:
+            lines.append("    → <i>eski tekshiruvdan</i>")
+        elif row["status"] != STATUS_PENDING:
             lines.append(f"    → <b>{esc(STATUS_LABEL[row['status']])}</b>")
         elif row["superseded_at"]:
             lines.append(

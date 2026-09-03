@@ -27,6 +27,7 @@ def row(**overrides) -> dict:
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
         "days_to_50": 2, "superseded_at": None, "window_days": 5,
         "kind": "Однотонный", "brand": "Millionaire", "material": "Хлопок",
+        "is_current": 1,
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)
@@ -100,6 +101,34 @@ class TestCardHeader:
     def test_brand_is_escaped(self) -> None:
         text = texts.card_caption([row(brand="A & B")], today=TODAY)
         assert "A &amp; B" in text
+
+
+class TestStaleEntriesOnCard:
+    """Karta oxirgi tekshiruvda topilmagan bandni ajratib ko'rsatishi kerak.
+
+    Menejer ko'rgan holat: menyudagi tugma "44935 · 20 dona (2 band)" der,
+    karta esa UCHTA filialni ko'rsatardi — uchinchisi eski tekshiruvdan
+    qolgan, hozirgi qoidaga tushmaydigan band edi. Farq hech qayerda
+    ko'rinmasdi va uning ustiga javob tugmasi ham bor edi.
+    """
+
+    def test_stale_row_is_marked(self) -> None:
+        text = texts.card_caption([row(is_current=0)], today=TODAY)
+        assert "⏸" in text and "eski tekshiruvdan" in text
+
+    def test_current_row_is_not_marked(self) -> None:
+        text = texts.card_caption([row(is_current=1)], today=TODAY)
+        assert "eski tekshiruvdan" not in text and "⚪️" in text
+
+    def test_answered_row_keeps_its_own_label(self) -> None:
+        """Javob berilgan band eski bo'lsa ham javobini ko'rsatadi."""
+        text = texts.card_caption([row(status=STATUS_TAKEN, is_current=0)], today=TODAY)
+        assert "OLINDI" in text and "eski tekshiruvdan" not in text
+
+    def test_missing_column_means_current(self) -> None:
+        eski = row()
+        eski.pop("is_current", None)
+        assert "eski tekshiruvdan" not in texts.card_caption([eski], today=TODAY)
 
 
 class TestEscaping:

@@ -535,7 +535,13 @@ async def card_items(sku: str, detected_date: date | None = None) -> list[aiosql
     where, params = _date_filter(detected_date)
     async with db().execute(
         f"""
-        SELECT * FROM candidate
+        -- `is_current` — band OXIRGI tekshiruvda topilganmi. Menyu faqat
+        -- shundaylarni sanaydi, karta esa hammasini ko'rsatadi; ikkisi
+        -- bir-biriga mos kelishi uchun karta farqni ko'rsatishi kerak.
+        SELECT *,
+               (last_run = (SELECT CAST(value AS INTEGER) FROM kv
+                            WHERE key = 'check_run_seq')) AS is_current
+        FROM candidate
         WHERE sku = ? {where}
         -- Javob berilmaganlar OLDINDA: karta sahifalanganda menejer kerakli
         -- bandlarni birinchi sahifada ko'radi, hal qilinganlari esa oxirida
