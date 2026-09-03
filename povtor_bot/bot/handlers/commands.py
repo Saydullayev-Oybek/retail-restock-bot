@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import datetime
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -227,15 +227,17 @@ async def cmd_announce(
 
 
 @router.message(Command("export"))
-async def cmd_export(message: Message) -> None:
+async def cmd_export(message: Message, settings: Settings) -> None:
     """BUGUN javob berilgan bandlarni xlsx qilib qaytaradi.
 
     Sana javob berilgan kun bo'yicha olinadi (aniqlangan kun emas): band bir
     necha kun oldin aniqlanib, bugun hal qilingan bo'lishi mumkin, va kunlik
     hisobot aynan bugungi QARORLARNI ko'rsatishi kerak.
+
+    Kun MAHALLIY vaqt (TZ sozlamasi) bo'yicha kesiladi — baza UTC saqlaydi.
     """
-    report_date = date.today()
-    rows = await repo.answered_for_export(report_date)
+    report_date = datetime.now(settings.timezone).date()
+    rows = await repo.answered_for_export(report_date, tz=settings.timezone)
     if not rows:
         await message.answer(
             f"{report_date.isoformat()} uchun javob berilgan band yo'q."

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 import aiosqlite
@@ -561,23 +561,38 @@ async def reset_candidate(candidate_id: int, user_id: int) -> bool:
     return changed
 
 
-async def answered_for_export(report_date: date) -> list[aiosqlite.Row]:
+async def answered_for_export(
+    report_date: date, tz: tzinfo | None = None
+) -> list[aiosqlite.Row]:
     """Export uchun: SHU KUNI javob berilgan bandlar.
 
     Nega answered_at bo'yicha, detected_date emas: band bir necha kun oldin
     aniqlanib, bugun hal qilingan bo'lishi mumkin. "Kunning hisoboti" — bugun
     qanday QAROR qabul qilinganini ko'rsatishi kerak.
+
+    Kun MAHALLIY vaqt bo'yicha kesiladi. Baza vaqtni UTC da yozadi
+    (`datetime('now')`), Toshkent esa UTC+5 — oddiy `date(answered_at) = ?`
+    bilan tunda 00:00-05:00 orasida berilgan javob kechagi kunga tushib,
+    bugungi hisobotdan yo'qolardi. Shuning uchun mahalliy kun chegaralari
+    UTC oralig'iga o'giriladi.
     """
+    boshi = datetime.combine(report_date, time.min, tzinfo=tz)
+    oxiri = boshi + timedelta(days=1)
     async with db().execute(
         f"""
         SELECT * FROM candidate
-        WHERE date(answered_at) = ?
+        WHERE answered_at >= ? AND answered_at < ?
           AND status IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
         ORDER BY shop_name, percent DESC, sku, color
         """,
-        (report_date.isoformat(),),
+        (_utc_text(boshi), _utc_text(oxiri)),
     ) as cursor:
         return list(await cursor.fetchall())
+
+
+def _utc_text(moment: datetime) -> str:
+    """Baza `datetime('now')` bilan solishtirsa bo'ladigan UTC matni."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 async def open_count(detected_date: date | None = None) -> int:

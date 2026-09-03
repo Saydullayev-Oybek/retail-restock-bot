@@ -9,7 +9,7 @@ botni ishlamas holga keltira oladi.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from aiogram import Bot
@@ -378,12 +378,16 @@ class TestExportCommand:
         rows = await repo.card_items("39666", TODAY)
         await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=MANAGER)
 
-        bot, dispatcher = RecordingBot(), build_dispatcher(FakeGateway(), settings_for())
+        settings = settings_for()
+        bot, dispatcher = RecordingBot(), build_dispatcher(FakeGateway(), settings)
         await dispatcher.feed_update(bot, command_update("/export"))
         assert "SendDocument" in bot.method_names
         document = next(p for n, p in bot.sent if n == "SendDocument")
-        # fayl nomi hisobot sanasi bo'yicha — javob bugun berildi
-        assert document["document"].filename == f"POVTOR_{date.today().isoformat()}.xlsx"
+        # Fayl nomi hisobot sanasi bo'yicha — javob bugun berildi.
+        # Sana MAHALLIY (TZ sozlamasi) bo'yicha olinadi, mashina soati
+        # bo'yicha emas: aks holda UTC serverida kechqurun test yiqilardi.
+        bugun = datetime.now(settings.timezone).date()
+        assert document["document"].filename == f"POVTOR_{bugun.isoformat()}.xlsx"
         await bot.session.close()
 
     async def test_nothing_answered_says_so(self) -> None:

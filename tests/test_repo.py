@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_PENDING, STATUS_TAKEN
-from povtor_bot.db import repo
+from povtor_bot.db import conn, repo
 
 from .conftest import TODAY, make_candidate
 
@@ -306,6 +307,51 @@ class TestExport:
         await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
         exported = await repo.answered_for_export(date.today())
         assert [r["sku"] for r in exported] == ["eski"]
+
+
+class TestExportUsesLocalDay:
+    """Hisobot kuni MAHALLIY vaqt bo'yicha kesilishi kerak.
+
+    Baza vaqtni UTC da yozadi (`datetime('now')`), fayl nomi esa mahalliy
+    sanadan olinadi. Toshkent UTC+5 bo'lgani uchun tunda 00:00-05:00 orasida
+    berilgan javob UTC'da HALI KECHAGI kun bo'ladi va bugungi hisobotdan
+    tushib qolardi.
+    """
+
+    TASHKENT = ZoneInfo("Asia/Tashkent")
+
+    async def _javob(self, sku: str, utc_vaqt: str) -> None:
+        await repo.insert_candidates([make_candidate(sku=sku)])
+        row = (await repo.card_items(sku))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        await conn.db().execute(
+            "UPDATE candidate SET answered_at = ? WHERE id = ?", (utc_vaqt, row["id"])
+        )
+        await conn.db().commit()
+
+    async def test_early_morning_answer_lands_on_the_right_day(self, database) -> None:
+        # Mahalliy 3-sen 03:00 = UTC 2-sen 22:00
+        await self._javob("tunda", "2026-09-02 22:00:00")
+        uchinchi = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        ikkinchi = await repo.answered_for_export(date(2026, 9, 2), tz=self.TASHKENT)
+        assert [r["sku"] for r in uchinchi] == ["tunda"]
+        assert ikkinchi == []
+
+    async def test_late_evening_answer_stays_on_its_day(self, database) -> None:
+        # Mahalliy 3-sen 23:30 = UTC 3-sen 18:30
+        await self._javob("kechqurun", "2026-09-03 18:30:00")
+        uchinchi = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        tortinchi = await repo.answered_for_export(date(2026, 9, 4), tz=self.TASHKENT)
+        assert [r["sku"] for r in uchinchi] == ["kechqurun"]
+        assert tortinchi == []
+
+    async def test_day_boundaries_are_exact(self, database) -> None:
+        """Mahalliy 00:00 kiradi, 24:00 kirmaydi."""
+        await self._javob("boshi", "2026-09-02 19:00:00")    # mahalliy 3-sen 00:00
+        await self._javob("oxiri", "2026-09-03 18:59:59")    # mahalliy 3-sen 23:59:59
+        await self._javob("keyingi", "2026-09-03 19:00:00")  # mahalliy 4-sen 00:00
+        kun = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        assert sorted(r["sku"] for r in kun) == ["boshi", "oxiri"]
 
 
 class TestSupersedeByNewArrival:
