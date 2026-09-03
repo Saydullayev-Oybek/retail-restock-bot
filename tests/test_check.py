@@ -12,8 +12,18 @@ from datetime import date, timedelta
 import pytest
 
 from povtor_bot.config import Settings
-from povtor_bot.core.models import ProductInfo, SalesRow, Shop, StockRow, TransferRow
-from povtor_bot.db import repo
+from povtor_bot.bot import texts
+from povtor_bot.core.models import (
+    STATUS_NOT_FOUND,
+    STATUS_PENDING,
+    STATUS_TAKEN,
+    ProductInfo,
+    SalesRow,
+    Shop,
+    StockRow,
+    TransferRow,
+)
+from povtor_bot.db import conn, repo
 from povtor_bot.services import check as check_service
 
 pytestmark = pytest.mark.usefixtures("database")
@@ -425,3 +435,327 @@ class TestStockRefreshCache:
         gw2 = self._gateway()
         await check_service.run_check(gw2, settings, today=TODAY)
         assert "stock" in gw2.calls
+
+
+class TestNotFoundReopens:
+    """"BOZORDA YO'Q" — o'sha kunga tegishli javob, "OLINDI" — butunlay.
+
+    Loyiha egasi (2026-09-03): "bozorda yo'q qilganlarni ertasi kuni yana
+    ko'rsatishi kerak, chunki ertasi kuni bozorga kelgan bo'lishi mumkin.
+    Faqat olindi degan tovarni ko'rsatmaydi."
+    """
+
+    KELGAN = TODAY - timedelta(days=1)
+
+    def _gateway(self) -> FakeGateway:
+        return FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", self.KELGAN, 6),
+                       a_transfer("shop1", "2", "Белый", self.KELGAN, 6)],
+            sales=[a_sale("shop1", "1", "Белый", self.KELGAN, 5),
+                   a_sale("shop1", "2", "Белый", self.KELGAN, 5)],
+            products=[a_product(sku="1"), a_product(sku="2")],
+        )
+
+    async def _kecha_javob(self, sku: str, status: str) -> None:
+        """Bandga KECHA javob berilgan holatni yasaydi."""
+        row = (await repo.card_items(sku))[0]
+        await repo.answer_candidate(row["id"], status=status, user_id=1)
+        kecha = f"{(TODAY - timedelta(days=1)).isoformat()} 12:00:00"
+        await conn.db().execute(
+            "UPDATE candidate SET answered_at = ? WHERE id = ?", (kecha, row["id"]))
+        await conn.db().execute(
+            "UPDATE item_event SET created_at = ? WHERE candidate_id = ?",
+            (kecha, row["id"]))
+        await conn.db().commit()
+
+    async def test_yesterdays_not_found_comes_back(self) -> None:
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)   # bozorda yo'q edi
+        await self._kecha_javob("2", STATUS_TAKEN)       # olingan
+        assert await repo.open_count() == 0
+
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        assert result.reopened == 1
+        ochiq = {r["sku"] for r in await repo.card_items("1")
+                 if r["status"] == STATUS_PENDING}
+        assert ochiq == {"1"}, "bozorda yo'q bo'lgani qaytishi kerak"
+        assert (await repo.card_items("2"))[0]["status"] == STATUS_TAKEN, \
+            "olingani qaytmasligi kerak"
+        assert await repo.open_count() == 1
+
+    async def test_same_day_answer_is_not_reopened(self) -> None:
+        """Ertalab "yo'q" desa, tushdagi tekshiruv uni qayta so'ramaydi."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        row = (await repo.card_items("1"))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_NOT_FOUND, user_id=1)
+
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.reopened == 0
+        assert (await repo.card_items("1"))[0]["status"] == STATUS_NOT_FOUND
+
+    async def test_reopened_row_is_marked(self) -> None:
+        """Karta bandning nega qaytganini ko'rsatishi kerak."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        row = (await repo.card_items("1"))[0]
+        assert row["reopened_at"] is not None
+        assert row["transfer_hint"] == "", "eski transfer taklifi tozalanishi kerak"
+        assert "avval bozorda yo'q edi" in texts.card_caption([row], today=TODAY)
+
+    async def test_yesterdays_export_keeps_the_answer(self) -> None:
+        """Qayta ochish KECHAGI Excel hisobotini buzmasligi kerak."""
+        settings = make_settings()
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        await self._kecha_javob("1", STATUS_NOT_FOUND)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+
+        kecha = await repo.answered_for_export(TODAY - timedelta(days=1))
+        assert [(r["sku"], r["status"]) for r in kecha] == [("1", STATUS_NOT_FOUND)]
+        assert await repo.answered_for_export(TODAY) == []
+
+
+class TestSupersedeInCheck:
+    """/tekshir yangi partiya kelganini o'zi payqashi kerak."""
+
+    async def test_new_arrival_closes_the_old_candidate(self) -> None:
+        from povtor_bot.core.models import Candidate
+
+        settings = make_settings()
+        # 6 kun oldingi band bazada turibdi
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=6), base_qty=5, sold_qty=3,
+            percent=60.0, days_to_50=4, grade="oddiy", recommended_qty=5,
+            note="60% sotildi", category_group="Poyasnaya",
+        )])
+        assert await repo.open_count() == 1
+
+        # Sklad bugun yubordi, lekin hali hech nima sotilmagan ->
+        # yangi nomzod TOPILMAYDI, eskisi baribir yopilishi kerak
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 20)],
+            sales=[],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, settings, today=TODAY)
+        assert result.total_found == 0
+        assert result.superseded == 1
+        assert await repo.open_count() == 0
+
+    async def test_empty_transfer_is_not_a_new_batch(self) -> None:
+        """0 DONALIK transfer qatori "yangi partiya keldi" degani EMAS.
+
+        Billz hisobotida bo'sh transfer qatorlari ko'p (o'lchovda skladdan
+        filialga 1475 qatordan 383 tasi = 26%). Ular hech nima yubormaydi,
+        lekin sana bo'yicha eng yangisi bo'lib chiqadi va bandni menyudan
+        noto'g'ri o'chirib yuboradi — tovar esa filialda tugab turgan bo'ladi.
+
+        detect_candidates bunday qatorlarni allaqachon chetlab o'tadi;
+        yangi partiya tekshiruvi ham xuddi shunday qilishi kerak.
+        """
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=4), base_qty=6, sold_qty=5,
+            percent=83.3, days_to_50=1, grade="ishonchli", recommended_qty=10,
+            note="83.3% sotildi", category_group="Poyasnaya",
+        )])
+        assert await repo.open_count() == 1
+
+        gateway = FakeGateway(
+            transfers=[
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=4), 6),
+                a_transfer("shop1", "1", "Белый", TODAY, 0),   # bo'sh qator
+            ],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+
+        assert result.superseded == 0, "bo'sh qator bandni yopmasligi kerak"
+        assert await repo.open_count() == 1, "band menyuda qolishi kerak"
+
+    async def test_real_batch_after_an_empty_row_still_closes(self) -> None:
+        """Bo'sh qator bordan keyin HAQIQIY partiya kelsa — band baribir yopiladi."""
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=4), base_qty=6, sold_qty=5,
+            percent=83.3, days_to_50=1, grade="ishonchli", recommended_qty=10,
+            note="x", category_group="Poyasnaya",
+        )])
+        gateway = FakeGateway(
+            transfers=[
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=4), 6),
+                a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 0),
+                a_transfer("shop1", "1", "Белый", TODAY, 8),   # haqiqiy partiya
+            ],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert result.superseded == 1
+
+    async def test_wrongly_closed_candidate_reopens(self) -> None:
+        """Xato yopilgan band keyingi tekshiruvda O'ZI qaytadi.
+
+        `superseded_at` chiqarilgan holat: uni "yopilgan" deb qoldirib
+        ketish emas, har tekshiruvda qayta hisoblash to'g'ri. Agar tekshiruv
+        bandni AYNAN OXIRGI partiya sifatida topgan bo'lsa, undan yangirog'i
+        yo'q degani — demak u yopiq turmasligi kerak.
+        """
+        from povtor_bot.core.models import Candidate
+
+        kelgan = TODAY - timedelta(days=4)
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=kelgan, base_qty=6, sold_qty=5, percent=83.3,
+            days_to_50=1, grade="ishonchli", recommended_qty=10, note="x",
+            category_group="Poyasnaya",
+        )])
+        # Bo'sh qator tufayli xato yopilgan holatni yasaymiz
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "1", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.open_count() == 0
+
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", kelgan, 6)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY - timedelta(days=3), 5)],
+            products=[a_product(sku="1")],
+        )
+        await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert await repo.open_count() == 1
+
+    async def test_both_batches_do_not_stack_up(self) -> None:
+        """Yangi partiya ham nomzod bo'lsa, menyuda BITTA band qolishi kerak."""
+        from povtor_bot.core.models import Candidate
+
+        await repo.insert_candidates([Candidate(
+            detected_date=TODAY - timedelta(days=2), shop_id="shop1",
+            shop_name="ANDALUS", sku="1", color="Белый",
+            arrived_date=TODAY - timedelta(days=6), base_qty=5, sold_qty=3,
+            percent=60.0, days_to_50=4, grade="oddiy", recommended_qty=5,
+            note="x", category_group="Poyasnaya",
+        )])
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY, 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 5)],
+            products=[a_product(sku="1")],
+        )
+        result = await check_service.run_check(gateway, make_settings(), today=TODAY)
+        assert result.total_found == 1
+        assert await repo.open_count() == 1          # ikkitasi emas
+        # Kartada faqat YANGI partiya: eskisiga javob berilmagan va u oxirgi
+        # tekshiruvda topilmagan, ya'ni raqamlari eskirgan
+        kartada = await repo.card_items("1")
+        assert [r["arrived_date"] for r in kartada] == [TODAY.isoformat()]
+
+
+class TestWindowOverride:
+    """Menejer /tekshir da oyna va chegarani o'zgartira oladi.
+
+    run_check imzosi o'zgarmagan — u sozlamalarni Settings dan oladi,
+    shuning uchun o'zgartirilgan NUSXA uzatiladi.
+    """
+
+    def _gateway(self) -> FakeGateway:
+        # Turli kunlarda kelgan uch partiya
+        return FakeGateway(
+            transfers=[
+                a_transfer("shop1", "yangi", "Белый", TODAY - timedelta(days=2), 5),
+                a_transfer("shop1", "orta", "Белый", TODAY - timedelta(days=5), 5),
+                a_transfer("shop1", "eski", "Белый", TODAY - timedelta(days=8), 5),
+            ],
+            sales=[
+                a_sale("shop1", "yangi", "Белый", TODAY, 3),
+                a_sale("shop1", "orta", "Белый", TODAY, 3),
+                a_sale("shop1", "eski", "Белый", TODAY, 3),
+            ],
+            products=[a_product(sku=s) for s in ("yangi", "orta", "eski")],
+        )
+
+    async def test_wider_window_finds_more(self) -> None:
+        besh = make_settings(window_days=5)
+        assert (await check_service.run_check(
+            self._gateway(), besh, today=TODAY)).total_found == 2
+
+    async def test_ten_days_reaches_the_old_batch(self) -> None:
+        settings = make_settings(window_days=10)
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.total_found == 3
+        assert {r["sku"] for r in await repo.card_items("eski")} == {"eski"}
+
+    async def test_higher_threshold_finds_fewer(self) -> None:
+        # 5 dan 3 = 60%, ya'ni 70% chegara hech kimni o'tkazmaydi
+        settings = make_settings(window_days=10, percent_threshold=70.0)
+        result = await check_service.run_check(self._gateway(), settings, today=TODAY)
+        assert result.total_found == 0
+
+    async def test_window_is_stored_on_the_candidate(self) -> None:
+        """Karta "eskirgan" belgisi shu qiymatga qaraydi, umumiy sozlamaga emas."""
+        settings = make_settings(window_days=10)
+        await check_service.run_check(self._gateway(), settings, today=TODAY)
+        rows = await repo.card_items("eski")
+        assert rows[0]["window_days"] == 10
+
+    async def test_original_settings_are_not_mutated(self) -> None:
+        asl = make_settings(window_days=5)
+        nusxa = asl.model_copy(update={"window_days": 10})
+        await check_service.run_check(self._gateway(), nusxa, today=TODAY)
+        assert asl.window_days == 5
+
+
+class TestRunScopedMenu:
+    """/tekshir tugagach menyu aynan shu tekshiruv natijasini ko'rsatadi."""
+
+    async def test_strict_rule_clears_the_menu(self) -> None:
+        settings = make_settings()
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 3)],     # 60%
+            products=[a_product(sku="1")],
+        )
+        # 50% chegara -> topiladi
+        await check_service.run_check(gateway, settings, today=TODAY)
+        assert await repo.open_count() == 1
+
+        # 80% chegara -> topilmaydi, menyu bo'shashi kerak
+        qattiq = settings.model_copy(update={"percent_threshold": 80.0})
+        result = await check_service.run_check(gateway, qattiq, today=TODAY)
+        assert result.total_found == 0
+        assert await repo.open_count() == 0
+
+        # Band bazada saqlanib qoldi, lekin kartada ko'rinmaydi
+        assert await repo.card_items("1") == []
+        async with conn.db().execute(
+            "SELECT COUNT(*) AS n FROM candidate WHERE sku = '1'"
+        ) as cursor:
+            assert (await cursor.fetchone())["n"] == 1
+
+    async def test_wider_rule_brings_items_back(self) -> None:
+        settings = make_settings()
+        gateway = FakeGateway(
+            transfers=[a_transfer("shop1", "1", "Белый", TODAY - timedelta(days=1), 5)],
+            sales=[a_sale("shop1", "1", "Белый", TODAY, 3)],
+            products=[a_product(sku="1")],
+        )
+        await check_service.run_check(
+            gateway, settings.model_copy(update={"percent_threshold": 80.0}), today=TODAY
+        )
+        assert await repo.open_count() == 0
+
+        await check_service.run_check(gateway, settings, today=TODAY)
+        assert await repo.open_count() == 1

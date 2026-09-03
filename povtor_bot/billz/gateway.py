@@ -28,6 +28,11 @@ log = logging.getLogger(__name__)
 COLOR_FIELD_NAMES = ("цвет", "color", "rang", "tus")
 SUBCATEGORY_FIELD_NAMES = ("подкатегория", "subcategory", "podkategoriya")
 KIND_FIELD_NAMES = ("вид", "kind", "tur")
+MATERIAL_FIELD_NAMES = ("материал", "material")
+# "Описание" — material emas, tafsilot maydoni: "Замш/Кожа" ham, "Пуговица",
+# "Молния", "Манжет" ham uchraydi (300 tovarlik namunada 93 tasida to'lgan).
+# Aynan shu maydon "Комбинация" degan noaniq materialni ochib beradi.
+DETAIL_FIELD_NAMES = ("описание", "description", "tavsif")
 
 # Billz hisobot dvigateli vaqtni QATOR soniga emas, HAR SO'ROVGA sarflaydi:
 # o'lchovda 500 qator 4.2s, 2000 qator 3.3s keldi. Shuning uchun sahifa
@@ -39,6 +44,17 @@ _MAX_PAGES = 200   # cheksiz sikldan himoya
 # token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
 # vaqtlari ustma-ust tushadi.
 _CONCURRENCY = 4
+# Bir vaqtda ochiq turadigan so'rovlarning UMUMIY chegarasi.
+#
+# Nega kerak: kunlar endi parallel so'raladi, ya'ni ichki `_paginate`
+# guruhlari ustma-ust tushadi. Chegarasiz qolsa bir zumda o'nlab so'rov
+# ochilib, Billz'ning DDoS himoyasiga tegishi mumkin.
+#
+# 12 tanlandi: token-bucket so'rovlarni 1.5/sek dan tez chiqarmaydi, javob
+# esa ~6.5 sekund keladi, ya'ni barqaror holatda ~10 ta so'rov ochiq turadi.
+# 12 shu tabiiy darajadan bir oz yuqori — cheklamaydi, lekin portlashning
+# oldini oladi.
+_MAX_INFLIGHT = 12
 
 
 def _pick(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -188,11 +204,17 @@ class BillzGateway:
 
     def __init__(
         self, client: BillzClient, page_limit: int = _PAGE_LIMIT,
-        concurrency: int = _CONCURRENCY,
+        concurrency: int = _CONCURRENCY, max_inflight: int = _MAX_INFLIGHT,
     ) -> None:
         self._client = client
         self._page_limit = max(1, page_limit)
         self._concurrency = max(1, concurrency)
+        self._gate = asyncio.Semaphore(max(1, max_inflight))
+
+    async def _fetch(self, path: str, params: dict[str, Any]) -> Any:
+        """Bitta so'rov — umumiy ochiq so'rovlar chegarasi ostida."""
+        async with self._gate:
+            return await self._client.get(path, params)
 
     # ───────────────────────── sahifalash ─────────────────────────
 
@@ -224,7 +246,7 @@ class BillzGateway:
         while page <= _MAX_PAGES:
             batch = range(page, min(page + self._concurrency, _MAX_PAGES + 1))
             payloads = await asyncio.gather(*[
-                self._client.get(path, {**params, "page": p, "limit": limit})
+                self._fetch(path, {**params, "page": p, "limit": limit})
                 for p in batch
             ])
             finished = False
@@ -267,14 +289,21 @@ class BillzGateway:
 
         `dedupe_by` — qolgan takrorlanishlarga qarshi zaxira.
         """
-        collected: list[dict[str, Any]] = []
-        day = start
-        while day <= end:
-            iso = day.isoformat()
-            collected.extend(await self._paginate(
-                path, {**params, "start_date": iso, "end_date": iso}, *keys
-            ))
-            day += timedelta(days=1)
+        # Kunlar PARALLEL so'raladi. Ilgari ketma-ket edi va butun tekshiruv
+        # vaqtining yarmi shunga ketardi: 6 kun x ~13 sekund. Kunlar bir-biriga
+        # bog'liq emas, shuning uchun kutish vaqtlari ustma-ust tushishi mumkin.
+        # Umumiy ochiq so'rovlar soni `_MAX_INFLIGHT` bilan cheklangan, tezlik
+        # esa avvalgidek token-bucket ostida (1.5 so'rov/sek).
+        kunlar = [
+            (start + timedelta(days=offset)).isoformat()
+            for offset in range((end - start).days + 1)
+        ]
+        # gather natijalarni argument tartibida qaytaradi — kunlar tartibi saqlanadi
+        per_day = await asyncio.gather(*[
+            self._paginate(path, {**params, "start_date": iso, "end_date": iso}, *keys)
+            for iso in kunlar
+        ])
+        collected: list[dict[str, Any]] = [row for rows in per_day for row in rows]
 
         if not dedupe_by:
             return collected
@@ -495,6 +524,8 @@ def _product_info(row: dict[str, Any]) -> ProductInfo | None:
         # Podkategoriya custom_fields da; level_2 zaxira sifatida qoladi
         subcategory=custom_field(row, SUBCATEGORY_FIELD_NAMES) or sub_from_levels,
         kind=custom_field(row, KIND_FIELD_NAMES),
+        brand=str(_pick(row, "brand_name", "brand")).strip(),
+        material=_material(row),
         supplier=_first_supplier(row),
         image_file=_main_image(row),
         supply_price=supply_price,
@@ -503,8 +534,28 @@ def _product_info(row: dict[str, Any]) -> ProductInfo | None:
     )
 
 
+def _material(row: dict[str, Any]) -> str:
+    """Material matni: "Материал" + tafsilot.
+
+    Yolg'iz "Материал" ko'pincha yetarli emas — "Комбинация" nimaning
+    kombinatsiyasi ekanini aytmaydi. Tafsilot maydoni ("Описание") aynan shuni
+    ochadi: "Комбинация · Замш/Кожа". Ikkalasi ham bo'sh bo'lishi mumkin.
+    """
+    material = custom_field(row, MATERIAL_FIELD_NAMES)
+    detail = custom_field(row, DETAIL_FIELD_NAMES)
+    if detail and detail != material:
+        return f"{material} · {detail}" if material else detail
+    return material
+
+
 def _main_image(row: dict[str, Any]) -> str:
-    url = str(_pick(row, "main_image_url")).strip()
+    """Rasm manzili. To'liq URL ustunroq — u hech qanday sozlama talab qilmaydi.
+
+    Billz `main_image_url` da faqat fayl nomini beradi ("<uuid>.jpg"), lekin
+    yonida `main_image_url_full` ni ham qaytaradi (namunada 265/300 to'lgan).
+    Shu sababli BILLZ_IMAGE_BASE_URL sozlamasi amalda kerak emas.
+    """
+    url = str(_pick(row, "main_image_url_full", "main_image_url")).strip()
     if url:
         return url
     photos = row.get("photos")
@@ -512,10 +563,12 @@ def _main_image(row: dict[str, Any]) -> str:
         # is_main belgilangani ustunroq, bo'lmasa birinchisi
         for photo in photos:
             if isinstance(photo, dict) and photo.get("is_main"):
-                return str(photo.get("photo_url", "")).strip()
+                return str(_pick(photo, "photo_url_full", "photo_url")).strip()
         for photo in photos:
-            if isinstance(photo, dict) and photo.get("photo_url"):
-                return str(photo["photo_url"]).strip()
+            if isinstance(photo, dict):
+                url = str(_pick(photo, "photo_url_full", "photo_url")).strip()
+                if url:
+                    return url
     return ""
 
 

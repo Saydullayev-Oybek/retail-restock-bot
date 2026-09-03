@@ -34,8 +34,14 @@ class ProductInfo:
     category_group: str = ""   # Billz level_1 — menyuning 1-darajasi
     subcategory: str = ""      # custom_fields["Подкатегория"]
     kind: str = ""             # custom_fields["Вид"] — Excel'dagi "Tur" ustuni
+    # Bu akkauntda `name` model nomi emas, tur nomi: 956 artikulga atigi 84 xil
+    # nom to'g'ri keladi ("Кеды-Casual" ni 33 ta artikul baham ko'radi).
+    # Modelni matn bilan ajratadigan yagona maydon — brend.
+    brand: str = ""            # Billz `brand_name`
+    material: str = ""         # custom_fields["Материал"] + ["Описание"]
     supplier: str = ""
-    # Billz faqat fayl nomini qaytaradi ("<uuid>.jpg"), to'liq manzil emas
+    # Billz `main_image_url_full` da to'liq manzil beradi; zaxira sifatida
+    # `main_image_url` (faqat fayl nomi) ishlatiladi
     image_file: str = ""
     supply_price: float = 0.0
     supply_currency: str = "UZS"
@@ -114,12 +120,16 @@ class Candidate:
     subcategory: str = ""
     kind: str = ""
     product_name: str = ""
+    brand: str = ""
+    material: str = ""
     supplier: str = ""
     product_id: str = ""
     image_url: str = ""
     supply_price: float = 0.0
     supply_currency: str = "UZS"
     price_uzs: int = 0
+    # Qaysi oyna bilan topilgani — kartadagi "eskirgan" belgisi shunga qaraydi
+    window_days: int = 5
 
 
 # Statuslar — bitta joyda, magic string tarqalmasin

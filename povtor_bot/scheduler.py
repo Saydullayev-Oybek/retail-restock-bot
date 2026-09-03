@@ -14,6 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .billz.gateway import BillzGateway
 from .bot import texts
 from .config import Settings
+from .services import backup as backup_service
 from .services import check as check_service
 
 log = logging.getLogger(__name__)
@@ -25,7 +26,18 @@ def build_scheduler(bot: Bot, gateway: BillzGateway, settings: Settings) -> Asyn
 
     async def daily_check() -> None:
         log.info("Kunlik avtomatik tekshiruv boshlandi")
-        result = await check_service.run_check(gateway, settings)
+        # Nusxa tekshiruvdan OLDIN: kechagi holat saqlanib qoladi, ya'ni
+        # bugungi tekshiruv nimanidir buzsa ham orqaga qaytish mumkin
+        if settings.backup_dir:
+            await backup_service.make_backup(
+                settings.backup_dir, settings.backup_keep_days
+            )
+        try:
+            result = await check_service.run_check(gateway, settings)
+        except check_service.CheckAlreadyRunning:
+            # Menejer aynan shu daqiqada qo'lda ishga tushirgan — takrorlash shart emas
+            log.info("Tekshiruv allaqachon ketyapti, cron o'tkazib yuborildi")
+            return
         if not result.ok:
             log.error("Kunlik tekshiruv xatosi: %s", result.error)
         # Natijani menejerlarga xabar qilamiz — ular ertalab tayyor ro'yxat ko'rsin

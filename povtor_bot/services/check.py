@@ -19,9 +19,10 @@ esa atigi ~200 ta artikul kerak, va ular product_variant jadvalida keshlanadi.
 from __future__ import annotations
 
 import logging
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, TypeVar
 
 from ..billz.gateway import BillzGateway
@@ -35,6 +36,20 @@ log = logging.getLogger(__name__)
 # Rang qo'shiladigan hisobot qatori — transfer yoki sotuv
 _Row = TypeVar("_Row", TransferRow, SalesRow)
 
+# Bir vaqtda bitta tekshiruv. Ikki menejer bir vaqtda /tekshir bossa (yoki
+# qo'lda chaqiruv 09:00 cron'i bilan ustma-ust tushsa) ikkita to'liq sikl
+# ketardi: Billz'ga ikki barobar yuk, va qoldiq snapshoti ikkalasidan
+# aralashib yozilishi mumkin (biri DELETE qilganda ikkinchisi INSERT qilyapti).
+_check_lock = asyncio.Lock()
+
+
+class CheckAlreadyRunning(RuntimeError):
+    """Tekshiruv allaqachon ketyapti."""
+
+
+def is_running() -> bool:
+    return _check_lock.locked()
+
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
@@ -43,9 +58,23 @@ class CheckResult:
     new_count: int
     total_found: int
     stock_rows: int
+    # Filiallardagi qoldiq: dona va artikul soni (qator soni menejerga
+    # hech nima bermaydi — 16 148 qator = 92 289 dona bo'lib chiqadi)
+    stock_units: int = 0
+    stock_skus: int = 0
+    stock_age_hours: float | None = None
+    # Topilgan nomzodlarning taqsimoti — hisobotdagi raqamlar o'zaro
+    # to'g'ri kelishi uchun. Aks holda "121 topildi, menyuda 117" chiqadi
+    # va sabab ko'rinmaydi.
+    open_now: int = 0          # menyuda
+    already_answered: int = 0  # avval javob berilgan (OLINDI / BOZORDA YO'Q)
     usd_rate: float = 0.0
     transfer_rows: int = 0
     synced_skus: int = 0
+    # Yangi partiya kelgani uchun avtomatik yopilgan bandlar
+    superseded: int = 0
+    # Kechagi "BOZORDA YO'Q" javoblari — bugun qayta so'raladi
+    reopened: int = 0
     error: str = ""
 
     @property
@@ -65,6 +94,7 @@ def rule_config(settings: Settings) -> RuleConfig:
         high_percent=settings.high_percent,
         allowed_category_groups=tuple(settings.allowed_category_groups),
         high_percent_overrides_min_sold=settings.high_percent_overrides_min_sold,
+        grade_rule=settings.grade_rule,
     )
 
 
@@ -108,6 +138,7 @@ async def sync_variants(
                 {
                     "product_id": v.product_id, "sku": v.sku, "color": v.color,
                     "subcategory": v.subcategory, "kind": v.kind,
+                    "brand": v.brand, "material": v.material,
                     "supplier": v.supplier, "product_name": v.name,
                     "category_group": v.category_group, "image_file": v.image_file,
                 }
@@ -142,6 +173,30 @@ def _apply_color(rows: Sequence[_Row], variants: Mapping[str, Any]) -> list[_Row
     return result
 
 
+def _latest_arrivals(
+    transfers: Sequence[TransferRow],
+) -> dict[tuple[str, str, str], date]:
+    """(filial, artikul, rang) -> skladdan OXIRGI HAQIQIY kelgan sana.
+
+    0 donalik qatorlar chetlab o'tiladi. Billz hisobotida ular ko'p —
+    o'lchovda skladdan filialga 1475 qatordan 383 tasi (26%) bo'sh chiqdi.
+    Bunday qator hech nima yubormaydi, lekin sanasi eng yangi bo'lgani uchun
+    bandni "yangi partiya keldi" deb yopib qo'yardi: menejer tovar tugab
+    turganini ko'rmay qolardi.
+
+    detect_candidates ham aynan shu filtrni qo'llaydi (`quantity <= 0` ->
+    o'tkazib yuborish), shuning uchun ikkala tomon bir xil sanani ko'radi.
+    """
+    oxirgi: dict[tuple[str, str, str], date] = {}
+    for row in transfers:
+        if row.quantity <= 0:
+            continue
+        key = (row.to_shop_id, row.sku, row.color)
+        if key not in oxirgi or row.arrived_date > oxirgi[key]:
+            oxirgi[key] = row.arrived_date
+    return oxirgi
+
+
 def _product_index(variants: Mapping[str, Any]) -> dict[tuple[str, str], ProductInfo]:
     """(sku, color) -> ProductInfo. Bir kalitga bir nechta variatsiya tushadi."""
     index: dict[tuple[str, str], ProductInfo] = {}
@@ -152,6 +207,7 @@ def _product_index(variants: Mapping[str, Any]) -> dict[tuple[str, str], Product
             sku=row["sku"], color=row["color"], product_id=row["product_id"],
             name=row["product_name"], category_group=row["category_group"],
             subcategory=row["subcategory"], kind=row["kind"],
+            brand=row["brand"], material=row["material"],
             supplier=row["supplier"], image_file=row["image_file"],
         )
         # Rasmi/nomi to'liqrog'i qoladi
@@ -168,10 +224,22 @@ def _completeness(info: ProductInfo) -> int:
 async def run_check(
     gateway: BillzGateway, settings: Settings, *, today: date | None = None
 ) -> CheckResult:
-    """To'liq tekshiruv sikli."""
-    today = today or date.today()
-    cfg = rule_config(settings)
+    """To'liq tekshiruv sikli.
 
+    Bir vaqtda faqat bittasi ishlaydi; ikkinchisi CheckAlreadyRunning oladi.
+    Navbatga qo'yish foydasiz bo'lardi — ikkinchi tekshiruv birinchisidan
+    ikki daqiqa keyin bir xil natija berardi.
+    """
+    if _check_lock.locked():
+        raise CheckAlreadyRunning
+    async with _check_lock:
+        return await _run_check(gateway, settings, today=today or date.today())
+
+
+async def _run_check(
+    gateway: BillzGateway, settings: Settings, *, today: date
+) -> CheckResult:
+    cfg = rule_config(settings)
     warehouses = set(settings.warehouse_shop_ids)
     if not warehouses:
         return CheckResult(0, 0, 0, error="WAREHOUSE_SHOP_IDS sozlanmagan")
@@ -248,6 +316,7 @@ async def run_check(
             "sku": info.sku, "color": info.color, "product_id": info.product_id,
             "product_name": info.name, "category_group": info.category_group,
             "subcategory": info.subcategory, "kind": info.kind,
+            "brand": info.brand, "material": info.material,
             "supplier": info.supplier, "image_url": info.image_file,
             "supply_price": info.supply_price, "supply_currency": info.supply_currency,
         }
@@ -279,7 +348,37 @@ async def run_check(
         cfg=cfg,
         usd_rate=usd_rate,
     )
-    new_count = await repo.insert_candidates(candidates)
+    run_id = await repo.next_run_id()
+
+    # Kechagi "BOZORDA YO'Q" javoblarini qayta ochamiz: u javob "BUGUN
+    # topolmadim" degani edi, ehtiyoj esa qondirilmagan. Ertaga bozorda
+    # paydo bo'lishi mumkin, shuning uchun band yana so'raladi.
+    # "OLINDI" tegilmaydi — u yerda ehtiyoj yopilgan.
+    #
+    # Insert'dan OLDIN: qayta ochilgan qator `pending` bo'lgach,
+    # insert_candidates uni tekshiruvning o'z raqami bilan belgilaydi va
+    # band menyuda paydo bo'ladi.
+    ochildi = await repo.reopen_not_found(
+        datetime.combine(today, time.min, tzinfo=settings.timezone)
+    )
+    if ochildi:
+        log.info("Kechagi 'bozorda yo'q' javoblari qayta ochildi: %d", ochildi)
+
+    # Yangi partiya kelgan bandlarni yopamiz. Bu nomzod HISOBLASHDAN
+    # mustaqil: sklad tovar yuborgan bo'lsa ehtiyoj qondirilgan, hatto yangi
+    # partiya qoidaga tushmasa ham (masalan hali hech nima sotilmagan).
+    oxirgi = _latest_arrivals(colored_transfers)
+    yopildi = await repo.supersede_by_new_arrivals(
+        [(shop, sku, color, kun.isoformat())
+         for (shop, sku, color), kun in oxirgi.items()]
+    )
+    if yopildi:
+        log.info("Yangi partiya kelgani uchun %d band yopildi", yopildi)
+
+    new_count = await repo.insert_candidates(candidates, run_id)
+    # Tekshiruv tugadi — menyu endi shu raqamdagi bandlarni ko'rsatadi.
+    # Nomzod topilmagan bo'lsa ham chaqiriladi: bo'sh natija ham natija.
+    await repo.finish_run(run_id)
 
     if settings.raw_retention_days > 0:
         await repo.purge_raw(settings.raw_retention_days)
@@ -288,13 +387,25 @@ async def run_check(
         "Tekshiruv: %d nomzod topildi, %d tasi yangi (sotuv=%d, qoldiq=%d)",
         len(candidates), new_count, len(sales), len(stock),
     )
+    # Taqsimot: bu tekshiruv belgilagan qatorlar minus yangi partiya kelganlari
+    # = menyudagilar; qolgani esa avval javob berilgan bandlar (ular
+    # `insert_candidates` da tegilmaydi, `last_run` i ham yangilanmaydi).
+    belgilangan, yopiq = await repo.run_counts(run_id)
+    dona, artikullar = await repo.stock_summary()
     return CheckResult(
         new_count=new_count,
         total_found=len(candidates),
         stock_rows=len(stock) if refresh_stock else await repo.stock_snapshot_rows(),
+        stock_units=dona,
+        stock_skus=artikullar,
+        stock_age_hours=0.0 if refresh_stock else stock_age,
+        open_now=belgilangan - yopiq,
+        already_answered=max(0, len(candidates) - belgilangan),
         usd_rate=usd_rate,
         transfer_rows=len(warehouse_transfers),
         synced_skus=synced,
+        superseded=yopildi,
+        reopened=ochildi,
     )
 
 

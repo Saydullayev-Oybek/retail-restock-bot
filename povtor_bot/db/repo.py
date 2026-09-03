@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 
 import aiosqlite
@@ -81,7 +81,8 @@ async def cache_products(rows: Iterable[dict[str, Any]]) -> int:
         (
             row["sku"], row.get("color", ""), row.get("product_id", ""),
             row.get("product_name", ""), row.get("category_group", ""),
-            row.get("subcategory", ""), row.get("kind", ""), row.get("supplier", ""),
+            row.get("subcategory", ""), row.get("kind", ""),
+            row.get("brand", ""), row.get("material", ""), row.get("supplier", ""),
             row.get("image_url", ""), float(row.get("supply_price", 0) or 0),
             row.get("supply_currency", "UZS") or "UZS",
         )
@@ -94,14 +95,17 @@ async def cache_products(rows: Iterable[dict[str, Any]]) -> int:
             """
             INSERT INTO product_cache
                 (sku, color, product_id, product_name, category_group, subcategory,
-                 kind, supplier, image_url, supply_price, supply_currency, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 kind, brand, material, supplier, image_url, supply_price,
+                 supply_currency, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT (sku, color) DO UPDATE SET
                 product_id      = excluded.product_id,
                 product_name    = excluded.product_name,
                 category_group  = excluded.category_group,
                 subcategory     = excluded.subcategory,
                 kind            = excluded.kind,
+                brand           = excluded.brand,
+                material        = excluded.material,
                 supplier        = excluded.supplier,
                 -- yangi manzil bo'sh bo'lsa eskisi saqlanadi
                 image_url       = CASE WHEN excluded.image_url <> ''
@@ -183,7 +187,8 @@ async def save_variants(rows: Sequence[dict[str, Any]]) -> int:
     payload = [
         (
             row["product_id"], row["sku"], row.get("color", ""),
-            row.get("subcategory", ""), row.get("kind", ""), row.get("supplier", ""),
+            row.get("subcategory", ""), row.get("kind", ""),
+            row.get("brand", ""), row.get("material", ""), row.get("supplier", ""),
             row.get("product_name", ""), row.get("category_group", ""),
             row.get("image_file", ""),
         )
@@ -196,12 +201,13 @@ async def save_variants(rows: Sequence[dict[str, Any]]) -> int:
         await db().executemany(
             """
             INSERT INTO product_variant
-                (product_id, sku, color, subcategory, kind, supplier,
-                 product_name, category_group, image_file, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                (product_id, sku, color, subcategory, kind, brand, material,
+                 supplier, product_name, category_group, image_file, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT (product_id) DO UPDATE SET
                 sku = excluded.sku, color = excluded.color,
                 subcategory = excluded.subcategory, kind = excluded.kind,
+                brand = excluded.brand, material = excluded.material,
                 supplier = excluded.supplier, product_name = excluded.product_name,
                 category_group = excluded.category_group,
                 image_file = CASE WHEN excluded.image_file <> ''
@@ -269,13 +275,40 @@ async def mark_sku_synced(sku: str, variants: int) -> None:
 
 _CANDIDATE_COLUMNS = (
     "detected_date, shop_id, shop_name, category_group, subcategory, kind, product_name, "
-    "sku, color, supplier, product_id, image_url, supply_price, supply_currency, "
-    "price_uzs, base_qty, sold_qty, percent, days_to_50, grade, recommended_qty, "
-    "note, arrived_date"
+    "brand, material, sku, color, supplier, product_id, image_url, supply_price, "
+    "supply_currency, price_uzs, base_qty, sold_qty, percent, days_to_50, grade, "
+    "recommended_qty, note, arrived_date, window_days, last_run"
 )
 
 
-async def insert_candidates(candidates: Sequence[Candidate]) -> int:
+async def next_run_id() -> int:
+    """Keyingi tekshiruv raqami.
+
+    Menyu faqat eng oxirgi tekshiruv natijasini ko'rsatadi, shuning uchun har
+    tekshiruvga o'z raqami kerak. Vaqt tamg'asi emas, sanoq: ikki tekshiruv
+    bir soniyada tugasa ham ular ajralib turadi.
+    """
+    raw = await kv_get("check_run_seq")
+    return int(raw or 0) + 1
+
+
+async def finish_run(run_id: int) -> None:
+    """Tekshiruv tugadi — menyu shu raqamdagi bandlarni ko'rsatadi.
+
+    Nomzod TOPILMASA ham chaqiriladi: bo'sh natija ham natija, va menyu
+    eski tekshiruvni ko'rsatib turmasligi kerak.
+    """
+    await kv_set("check_run_seq", str(run_id))
+
+
+async def current_run_id() -> int:
+    raw = await kv_get("check_run_seq")
+    return int(raw or 0)
+
+
+async def insert_candidates(
+    candidates: Sequence[Candidate], run_id: int | None = None
+) -> int:
     """Nomzodlarni yozadi. Qaytadi: YANGI qo'shilganlar soni.
 
     Uch xil holat:
@@ -291,19 +324,28 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
     `detected_date` ataylab yangilanmaydi — u "bu bandni birinchi marta qachon
     ko'rsatgan edik" degan ma'noni saqlaydi, kartadagi yosh shundan hisoblanadi.
     """
+    # run_id berilmasa o'z tekshiruvimizni ochib yopamiz. /tekshir uni
+    # ataylab beradi: yangi partiyalarni yopish va nomzodlarni yozish BITTA
+    # tekshiruvga tegishli bo'lishi kerak.
+    auto = run_id is None
+    if auto:
+        run_id = await next_run_id()
+
     if not candidates:
+        if auto:
+            await finish_run(run_id)
         return 0
     payload = [
         (
             c.detected_date.isoformat(), c.shop_id, c.shop_name, c.category_group,
-            c.subcategory, c.kind, c.product_name, c.sku, c.color, c.supplier, c.product_id,
-            c.image_url, c.supply_price, c.supply_currency, c.price_uzs, c.base_qty,
-            c.sold_qty, c.percent, c.days_to_50, c.grade, c.recommended_qty,
-            c.note, c.arrived_date.isoformat(),
+            c.subcategory, c.kind, c.product_name, c.brand, c.material, c.sku, c.color,
+            c.supplier, c.product_id, c.image_url, c.supply_price, c.supply_currency,
+            c.price_uzs, c.base_qty, c.sold_qty, c.percent, c.days_to_50, c.grade,
+            c.recommended_qty, c.note, c.arrived_date.isoformat(), c.window_days, run_id,
         )
         for c in candidates
     ]
-    placeholders = ", ".join(["?"] * 23)
+    placeholders = ", ".join(["?"] * len(_CANDIDATE_COLUMNS.split(",")))
     async with write_lock():
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         before = (await cursor.fetchone())["n"]
@@ -320,7 +362,17 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
                 note            = excluded.note,
                 price_uzs       = excluded.price_uzs,
                 product_name    = excluded.product_name,
-                image_url       = excluded.image_url
+                brand           = excluded.brand,
+                material        = excluded.material,
+                image_url       = excluded.image_url,
+                window_days     = excluded.window_days,
+                last_run        = excluded.last_run,
+                -- Tekshiruv bu bandni AYNAN OXIRGI partiya sifatida topdi
+                -- (detect_candidates har kalit uchun faqat eng oxirgi
+                -- haqiqiy kelishni chiqaradi) — demak undan yangirog'i yo'q
+                -- va band yopiq turmasligi kerak. Belgi latch emas, har
+                -- tekshiruvda qayta hisoblanadi.
+                superseded_at   = NULL
             WHERE candidate.status = '{STATUS_PENDING}'
             """,
             payload,
@@ -328,7 +380,91 @@ async def insert_candidates(candidates: Sequence[Candidate]) -> int:
         cursor = await db().execute("SELECT COUNT(*) AS n FROM candidate")
         after = (await cursor.fetchone())["n"]
         await db().commit()
+    if auto:
+        await finish_run(run_id)
     return after - before
+
+
+async def reopen_not_found(before: datetime) -> int:
+    """Oldingi kunlarda "BOZORDA YO'Q" deb belgilangan bandlarni qayta ochadi.
+
+    Nega faqat `not_found`: bu javob "BUGUN bozorda topolmadim" degani, ehtiyoj
+    esa qondirilmagan — tovar filialda tugab turibdi va ertaga bozorda paydo
+    bo'lishi mumkin. "OLINDI" boshqa: u yerda ehtiyoj yopilgan, va qayta
+    so'rash menejerni ikki marta buyurtma berishga undardi.
+
+    `before` — mahalliy kunning boshi. Shu kunning O'ZIDA berilgan javob
+    tegilmaydi: menejer ertalab "yo'q" deb, tushda yana o'sha bandni ko'rib
+    turmasin.
+
+    Javob tarixi `item_event` da qoladi, shuning uchun o'sha kunning Excel
+    hisoboti qayta ochilgandan keyin ham to'g'ri bo'lib qolaveradi.
+    """
+    chegara = _utc_text(before)
+    async with write_lock():
+        # Avval ID'larni olamiz — hodisa yozuvi aynan shu qatorlarga tegishli
+        # bo'lsin (UPDATE dan keyin ularni ajratib bo'lmaydi)
+        async with db().execute(
+            f"SELECT id FROM candidate "
+            f"WHERE status = '{STATUS_NOT_FOUND}' AND answered_at < ?",
+            (chegara,),
+        ) as cursor:
+            ids = [row["id"] for row in await cursor.fetchall()]
+        if not ids:
+            return 0
+        await db().executemany(
+            f"""
+            UPDATE candidate
+               SET status = '{STATUS_PENDING}', answered_by = NULL,
+                   answered_at = NULL, transfer_hint = '',
+                   reopened_at = datetime('now')
+             WHERE id = ?
+            """,
+            [(i,) for i in ids],
+        )
+        await db().executemany(
+            "INSERT INTO item_event (candidate_id, user_id, action, payload) "
+            "VALUES (?, NULL, 'reopened', '{}')",
+            [(i,) for i in ids],
+        )
+        await db().commit()
+    return len(ids)
+
+
+async def supersede_by_new_arrivals(
+    arrivals: Sequence[tuple[str, str, str, str]]
+) -> int:
+    """Yangi partiya kelgan bandlarni yopadi.
+
+    arrivals — (shop_id, sku, color, arrived_date) oxirgi kelishlar.
+
+    Nega kerak: bot bandni faqat menejer javob berganda yopardi. Agar sklad
+    o'zi yangi partiya yuborsa, eski band menyuda "yana N dona ol" deb
+    turaverardi — ehtiyoj allaqachon qondirilgan bo'lsa ham. Bundan tashqari
+    yangi partiya ham nomzod bo'lsa, menejer bitta filial+rangni IKKI MARTA
+    ko'rib, ikki barobar buyurtma berib yuborishi mumkin edi.
+
+    Faqat javob berilmagan bandlar yopiladi: menejer allaqachon "OLINDI"
+    deb belgilagan band tarixda o'z holicha qolishi kerak.
+    """
+    if not arrivals:
+        return 0
+    async with write_lock():
+        cursor = await db().executemany(
+            f"""
+            UPDATE candidate
+               SET superseded_at = ?
+             WHERE shop_id = ? AND sku = ? AND color = ?
+               AND arrived_date < ?
+               AND status = '{STATUS_PENDING}'
+               AND superseded_at IS NULL
+            """,
+            [(arrived, shop, sku, color, arrived)
+             for shop, sku, color, arrived in arrivals],
+        )
+        yopildi = cursor.rowcount or 0
+        await db().commit()
+    return yopildi
 
 
 async def categories_with_open_counts(detected_date: date | None = None) -> list[aiosqlite.Row]:
@@ -338,7 +474,7 @@ async def categories_with_open_counts(detected_date: date | None = None) -> list
         f"""
         SELECT category_group, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' {where}
+        WHERE {_OPEN} {where}
         GROUP BY category_group
         HAVING open_count > 0
         ORDER BY open_count DESC, category_group
@@ -357,7 +493,7 @@ async def suppliers_with_open_counts(
         f"""
         SELECT supplier, COUNT(*) AS open_count
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND category_group = ? {where}
+        WHERE {_OPEN} AND category_group = ? {where}
         GROUP BY supplier
         HAVING open_count > 0
         ORDER BY open_count DESC, supplier
@@ -379,7 +515,8 @@ async def skus_with_open_counts(
                MAX(product_name)              AS product_name,
                SUM(recommended_qty)           AS total_qty
         FROM candidate
-        WHERE status = '{STATUS_PENDING}' AND category_group = ? AND supplier = ? {where}
+        WHERE {_OPEN}
+          AND category_group = ? AND supplier = ? {where}
         GROUP BY sku
         HAVING open_count > 0
         ORDER BY total_qty DESC, sku
@@ -390,17 +527,34 @@ async def skus_with_open_counts(
 
 
 async def card_items(sku: str, detected_date: date | None = None) -> list[aiosqlite.Row]:
-    """4-daraja: artikulning barcha filial+rang bandlari (hal qilinganlari ham).
+    """4-daraja: artikulning kartada ko'rsatiladigan bandlari.
 
-    Hal qilinganlari ham ko'rsatiladi — menejer nima qilganini ko'rib turishi
-    va xato bosgan bo'lsa bilishi kerak.
+    Ikki xil qator chiqadi:
+
+    * OXIRGI tekshiruv topgan, hali hal qilinmaganlari — ish shu yerda;
+    * javob berilganlari — menejer nima qilganini ko'rib tursin va xato
+      bosgan bo'lsa qaytara olsin.
+
+    Eski tekshiruvdan qolgan, javobsiz bandlar CHIQMAYDI. Ularning raqamlari
+    o'sha paytdagi holat, va ular hech qachon o'z-o'zidan yo'qolmasdi —
+    vaqt o'tgan sari kartani chalkashtirardi. Bazadan o'chmaydi: oynani
+    kengaytirgan tekshiruv ularni qayta topsa, o'zi qaytadi.
+
+    Yon foydasi: menyudagi "(N band)" va kartadagi bandlar soni endi
+    har doim mos keladi.
     """
     where, params = _date_filter(detected_date)
     async with db().execute(
         f"""
         SELECT * FROM candidate
         WHERE sku = ? {where}
-        ORDER BY shop_name, color
+          AND (status <> '{STATUS_PENDING}'
+               OR last_run = (SELECT CAST(value AS INTEGER) FROM kv
+                              WHERE key = 'check_run_seq'))
+        -- Javob berilmaganlar OLDINDA: karta sahifalanganda menejer kerakli
+        -- bandlarni birinchi sahifada ko'radi, hal qilinganlari esa oxirida
+        ORDER BY (status <> '{STATUS_PENDING}' OR superseded_at IS NOT NULL),
+                 shop_name, color
         """,
         (sku, *params),
     ) as cursor:
@@ -467,29 +621,61 @@ async def reset_candidate(candidate_id: int, user_id: int) -> bool:
     return changed
 
 
-async def answered_for_export(report_date: date) -> list[aiosqlite.Row]:
+async def answered_for_export(
+    report_date: date, tz: tzinfo | None = None
+) -> list[aiosqlite.Row]:
     """Export uchun: SHU KUNI javob berilgan bandlar.
 
     Nega answered_at bo'yicha, detected_date emas: band bir necha kun oldin
     aniqlanib, bugun hal qilingan bo'lishi mumkin. "Kunning hisoboti" — bugun
     qanday QAROR qabul qilinganini ko'rsatishi kerak.
+
+    Kun MAHALLIY vaqt bo'yicha kesiladi. Baza vaqtni UTC da yozadi
+    (`datetime('now')`), Toshkent esa UTC+5 — oddiy `date(answered_at) = ?`
+    bilan tunda 00:00-05:00 orasida berilgan javob kechagi kunga tushib,
+    bugungi hisobotdan yo'qolardi. Shuning uchun mahalliy kun chegaralari
+    UTC oralig'iga o'giriladi.
     """
+    boshi = datetime.combine(report_date, time.min, tzinfo=tz)
+    oxiri = boshi + timedelta(days=1)
     async with db().execute(
         f"""
-        SELECT * FROM candidate
-        WHERE date(answered_at) = ?
-          AND status IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
-        ORDER BY shop_name, percent DESC, sku, color
+        -- Manba `candidate.status` emas, `item_event`: "BOZORDA YO'Q" javobi
+        -- keyingi kungi tekshiruvda qayta ochiladi va qatordagi status
+        -- yo'qoladi, o'sha kunning hisoboti esa o'zgarmasligi kerak.
+        --
+        -- Har band uchun kunning OXIRGI hodisasi olinadi: menejer javob
+        -- berib, keyin bekor qilgan bo'lsa ("reset"), u kunlik hisobotga
+        -- tushmasligi kerak.
+        SELECT c.shop_name, c.sku, c.color, c.subcategory, c.kind, c.supplier,
+               c.brand, c.material, c.base_qty, c.sold_qty, c.percent,
+               c.days_to_50, c.grade, c.recommended_qty, c.note,
+               e.action AS status
+        FROM (
+            SELECT candidate_id, MAX(id) AS oxirgi
+            FROM item_event
+            WHERE created_at >= ? AND created_at < ?
+            GROUP BY candidate_id
+        ) kun
+        JOIN item_event e ON e.id = kun.oxirgi
+        JOIN candidate c ON c.id = e.candidate_id
+        WHERE e.action IN ('{STATUS_TAKEN}', '{STATUS_NOT_FOUND}')
+        ORDER BY c.shop_name, c.percent DESC, c.sku, c.color
         """,
-        (report_date.isoformat(),),
+        (_utc_text(boshi), _utc_text(oxiri)),
     ) as cursor:
         return list(await cursor.fetchall())
+
+
+def _utc_text(moment: datetime) -> str:
+    """Baza `datetime('now')` bilan solishtirsa bo'ladigan UTC matni."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 async def open_count(detected_date: date | None = None) -> int:
     where, params = _date_filter(detected_date)
     async with db().execute(
-        f"SELECT COUNT(*) AS n FROM candidate WHERE status = '{STATUS_PENDING}' {where}",
+        f"SELECT COUNT(*) AS n FROM candidate WHERE {_OPEN} {where}",
         params,
     ) as cursor:
         return (await cursor.fetchone())["n"]
@@ -505,6 +691,16 @@ def _date_filter(detected_date: date | None) -> tuple[str, tuple[Any, ...]]:
     if detected_date is None:
         return "", ()
     return "AND detected_date = ?", (detected_date.isoformat(),)
+
+
+# Menyu faqat oxirgi tekshiruvda topilgan bandlarni ko'rsatadi. Menejer
+# qoidani (oyna, chegara) o'zi tanlagan ekan, ro'yxat aynan shu qoidaga
+# javob berishi kerak — aks holda eski tekshiruvlar natijasi to'planib,
+# bugungi ish ular orasida ko'rinmay qoladi.
+_OPEN = (
+    f"status = '{STATUS_PENDING}' AND superseded_at IS NULL "
+    "AND last_run = (SELECT CAST(value AS INTEGER) FROM kv WHERE key = 'check_run_seq')"
+)
 
 
 # ───────────────────────────── card_msg ─────────────────────────────
@@ -638,6 +834,33 @@ async def replace_stock_snapshot(
 async def stock_snapshot_rows() -> int:
     async with db().execute("SELECT COUNT(*) AS n FROM stock_snapshot") as cursor:
         return (await cursor.fetchone())["n"]
+
+
+async def stock_summary() -> tuple[int, int]:
+    """Qoldiq snapshoti: (dona, artikul). Qator soni menejerga hech nima bermaydi."""
+    async with db().execute(
+        "SELECT COALESCE(SUM(quantity), 0) AS dona, "
+        "COUNT(DISTINCT sku) AS artikul FROM stock_snapshot"
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row["dona"]), int(row["artikul"])
+
+
+async def run_counts(run_id: int) -> tuple[int, int]:
+    """Shu tekshiruv belgilagan qatorlar: (jami, yangi partiya kelgani).
+
+    Javob berilgan qatorlar `insert_candidates` da tegilmaydi, ya'ni ularning
+    `last_run` i yangilanmaydi — shuning uchun bu yerga tushmaydi. Hisobotdagi
+    "javob bergansiz" soni shundan kelib chiqadi: topilgan - shu yerdagi jami.
+    """
+    async with db().execute(
+        "SELECT COUNT(*) AS jami, "
+        "COALESCE(SUM(superseded_at IS NOT NULL), 0) AS yopilgan "
+        "FROM candidate WHERE last_run = ?",
+        (run_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row["jami"]), int(row["yopilgan"])
 
 
 async def stock_snapshot_age_hours() -> float | None:

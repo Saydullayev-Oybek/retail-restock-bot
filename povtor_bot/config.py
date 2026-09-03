@@ -75,8 +75,12 @@ class Settings(BaseSettings):
     window_days: int = 5
     percent_threshold: float = 50.0
     min_base_qty: int = 5
-    confident_max_days: int = 3
+    # Texnik topshiriq: "2 kun ichida yetsa — yuqori tavsiya miqdori"
+    confident_max_days: int = 2
     confident_min_sold: int = 4
+    # "speed" — texnik topshiriqdagi qoida (faqat tezlik)
+    # "speed_and_volume" — namuna Excel'dan olingan (tezlik + hajm)
+    grade_rule: str = "speed"
     qty_confident: int = 10
     qty_normal: int = 5
     high_percent: float = 80.0
@@ -86,10 +90,21 @@ class Settings(BaseSettings):
 
     # ─── Boshqa ───
     db_path: str = "var/povtor.db"
+    # Bitta nusxa qulfi — ikkinchi bot ishga tushmasligi uchun
+    lock_path: str = "var/povtor.lock"
+    # Kunlik zaxira nusxa. Baza bitta fayl — yo'qolsa menejerlar bergan
+    # barcha javoblar va audit tarixi ketadi.
+    backup_dir: str = "var/backup"
+    backup_keep_days: int = 14
     tz: str = "Asia/Tashkent"
     schedule_time: str = "09:00"
     announce_lookback_days: int = 2
     raw_retention_days: int = 7
+    # Sukut bo'yicha faqat XATO javoblar saqlanadi. Muvaffaqiyatli javoblar
+    # juda katta (bitta hisobot sahifasi ~100 KB) va foydasi yo'q — muammo
+    # chiqqanda kerak bo'ladigani xato javob. Billz javob shakli o'zgarganda
+    # tekshirish uchun vaqtincha true qilib qo'yish mumkin.
+    billz_raw_log_all: bool = False
     log_level: str = "INFO"
 
     # pydantic ro'yxatni JSON deb o'qishga urinadi; bizda oddiy CSV — o'zimiz bo'lamiz

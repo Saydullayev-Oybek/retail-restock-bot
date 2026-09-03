@@ -36,11 +36,22 @@ Skript do'konlar ro'yxatini `id  nom` ko'rinishida chiqaradi.
 
 ---
 
+## Ishga tushirish haqida
+
+**Bitta nusxa qulfi.** Bot ishga tushganda `var/povtor.lock` faylini band
+qiladi. Ikkinchi nusxa darhol to'xtaydi va ishlab turgan jarayonning PID'ini
+ko'rsatadi. Nega kerak: Telegram bitta token bilan faqat bitta `getUpdates`
+iste'molchisiga ruxsat beradi, va har nusxada o'z cron'i bo'ladi — sinov
+davrida 10 ta jarayon bir vaqtda ishlab qolgan edi.
+
+**Kunlik zaxira nusxa.** 09:00 tekshiruvidan OLDIN olinadi (`var/backup/`,
+14 kun saqlanadi) — bugungi tekshiruv nimanidir buzsa orqaga qaytish mumkin.
+
 ## Buyruqlar
 
 | Buyruq | Ish |
 |---|---|
-| `/tekshir` | Billz'dan tortadi → nomzodlarni hisoblaydi → yangilarini yozadi |
+| `/tekshir` | Qoidani so'raydi (oyna va chegara), keyin Billz'dan tortib nomzodlarni hisoblaydi |
 | `/buyurtma` | Kaskadli menyu: kategoriya → ta'minotchi → artikul → karta |
 | `/yangi` | Yangi kelgan tovarlarni umumiy guruhga e'lon qiladi |
 | `/export` | Kunning javoblarini Excel'ga chiqaradi (har filialga alohida varaq) |
@@ -50,6 +61,47 @@ Bundan tashqari bot **har kuni `SCHEDULE_TIME` da** (default 09:00,
 xabar qiladi.
 
 ---
+
+## `/tekshir` — qoidani menejer tanlaydi
+
+```
+/tekshir
+   ↓
+📅 Necha kunlik oyna?     [3] [• 5] [7] [10] [14]
+   ↓
+📊 Sotuv chegarasi?       [40%] [• 50%] [60%] [70%] [80%]
+   ↓
+✅ Tekshiruv tugadi
+   oyna 7 kun · chegara 60%
+```
+
+`•` — `.env` dagi sukut qiymat. Qisqa yo'l: `/tekshir 7` yoki `/tekshir 7 60`.
+
+Nega kerak: bir xil ma'lumotdan turli savollar chiqadi — *"bugun nima tez
+ketdi"* uchun `3 kun / 60%`, *"nimalar to'planib qoldi"* uchun `14 kun / 50%`.
+Ilgari buni o'zgartirish uchun `.env` ni tahrirlab botni qayta ishga tushirish
+kerak edi.
+
+Tanlangan qiymat **eslab qolinmaydi** — har tekshiruvda qaytadan so'raladi.
+Kunlik 09:00 tekshiruvi hech kimdan so'ray olmaydi, u `.env` qiymatlari
+bilan ishlaydi.
+
+Band **qaysi oyna bilan topilgani** o'z qatorida saqlanadi (`window_days`),
+shuning uchun 10 kunlik tekshiruvdan chiqqan 7 kunlik band `⚠️ eskirgan`
+deb belgilanmaydi.
+
+### `/buyurtma` oxirgi tekshiruv natijasini ko'rsatadi
+
+Menejer qoidani o'zi tanlagan ekan, ro'yxat aynan **shu qoidaga** javob
+berishi kerak. Har band qaysi tekshiruvda topilgani saqlanadi (`last_run`),
+va menyu faqat eng oxirgisini ko'rsatadi.
+
+Ilgari natijalar **to'planib borardi**: `3 kun / 70%` bilan 0 ta topilsa ham
+menyuda oldingi tekshiruvlardan qolgan 101 ta band turaverardi, va bugungi
+ish ular orasida ko'rinmasdi.
+
+Bandlar **o'chirilmaydi** — ular bazada, kartada va `/export` da qoladi.
+Kengroq qoida bilan qayta tekshirilsa ro'yxatga qaytadi.
 
 ## Nomzod aniqlash qoidasi
 
@@ -91,21 +143,39 @@ partiyadan ko'p chiqadi (5 keldi, 6 sotildi). Bunday holatda partiya to'g'ri
 maxraj emas — namuna faylda ham foiz hech qachon 100 dan oshmagan. "Sotilgan"
 ustunida esa haqiqiy raqam saqlanadi.
 
-**Daraja:**
+**Daraja** — texnik topshiriqdagi qoida (`GRADE_RULE=speed`, sukut):
 
-| Shart | Daraja | Tavsiya |
+> *"Qancha tezroq 50%ga yetgan bo'lsa, shuncha ishonchli. 2 kun ichida yetsa —
+> yuqori tavsiya miqdori, 3-5 kun ichida — o'rtacha."*
+
+| 50%ga yetgan kun | Daraja | Tavsiya |
 |---|---|---|
-| `sold_qty ≥ 4` **VA** (`percent ≥ 80` **YOKI** `days_to_50 ≤ 3`) | `ishonchli` | **10 dona** |
-| qolgan hamma holat | `oddiy` | **5 dona** |
+| 0–2 | `ishonchli` | **10 dona** |
+| 3–5 | `oddiy` | **5 dona** |
 
-> Bu qoida hozirgi qo'lda ishlaydigan jarayondan olingan **128 qatorli haqiqiy
-> POVTOR faylining hammasiga** mos keladi (`tests/fixtures/golden_rules.json`),
-> va `tests/test_rules.py` uni har ishga tushirishda qayta tekshiradi.
+### Ikkinchi rejim: `GRADE_RULE=speed_and_volume`
 
-`sold_qty ≥ 4` shartining sababi: kichik partiyada tasodif ulushi katta —
-5 tadan 3 tasi 3 kunda sotilishi 11 tadan 7 tasi 3 kunda sotilishi bilan bir xil
-ishonch bermaydi. Agar 100% sotilgan kichik partiya ham "ishonchli" bo'lishini
-xohlasangiz, `.env` da `HIGH_PERCENT_OVERRIDES_MIN_SOLD=true` qiling.
+Namuna POVTOR faylidan teskari muhandislik qilingan variant:
+
+```
+ishonchli ⇔ sotilgan ≥ 4 VA (foiz ≥ 80 YOKI 50%ga ≤ 3 kunda)
+```
+
+U namuna fayldagi **128 qatorning hammasiga** mos keladi
+(`tests/fixtures/golden_rules.json`), texnik topshiriq qoidasi esa
+**28 qatorda farq qiladi** — chunki amaldagi qo'lda ishlaydigan jarayon
+tezlikdan tashqari **hajmni** ham hisobga olar ekan:
+
+```
+asos=6  sotilgan=6  foiz=100%  50%ga 3-kunda  →  Excel: ishonchli
+asos=5  sotilgan=4  foiz=80%   50%ga 4-kunda  →  Excel: ishonchli
+```
+
+Topshiriqda `masalan` deb yozilgani uchun u misol, aniq formula emas.
+**Loyiha egasi texnik topshiriqni asos qilib tanladi.**
+
+Real ma'lumotda farq: 105 banddan 36 tasi darajasini o'zgartiradi, umumiy
+tavsiya miqdori −5% (745 → 715 dona).
 
 Barcha raqamlar `.env` orqali sozlanadi.
 
@@ -135,15 +205,38 @@ qayta yoziladi.
 
 ### Muhim texnik qarorlar
 
+**Ikkita javob — ikkita umr.** `OLINDI` va `BOZORDA YO'Q` bir xil ko'rinadi,
+lekin ma'nosi teskari:
+
+| Javob | Ma'nosi | Keyingi tekshiruvda |
+|---|---|---|
+| `OLINDI` | ehtiyoj **qondirildi** | qaytmaydi — faqat sklad yangi partiya yuborsa, va u **yangi band** bo'ladi |
+| `BOZORDA YO'Q` | **bugun** topolmadim, ehtiyoj **qolmoqda** | **ertasi kuni qayta so'raladi** — bozorda paydo bo'lgan bo'lishi mumkin |
+
+Shu kunning o'zida qayta tekshirilsa `BOZORDA YO'Q` tegilmaydi: menejer ertalab
+"yo'q" deb, tushda o'sha bandni yana ko'rib turmasin. Qayta ochilgan band
+kartada `🔁 avval bozorda yo'q edi` deb belgilanadi.
+
+Cheklov: qayta ochish faqat band hali **oyna ichida** bo'lsa ko'rinadi. Tovar
+kelganiga `WINDOW_DAYS` dan ko'p bo'lsa, tekshiruv uni umuman topmaydi —
+u holda oynani kengaytirish kerak (`/tekshir 10 50`).
+
+**Kunlik hisobot manbai — `item_event`, `candidate.status` emas.** Qayta ochilgan
+bandning statusi yo'qoladi, o'sha kungi Excel esa o'zgarmasligi kerak. Hodisa
+jurnali har bir javobni vaqti bilan saqlaydi, shuning uchun kechagi fayl kechagi
+qarorlarni ko'rsatib turaveradi. Kun ichida javob berib keyin bekor qilingan band
+hisobotga tushmaydi — har band uchun kunning **oxirgi** hodisasi olinadi.
+
 **Rasm Telegram'ga yuklab olinadi, URL uzatilmaydi.** Billz hujjati CDN'dan
 rasmni uchinchi tomon resurslarida ko'rsatishni taqiqlaydi. Shu sababli rasm bir
 marta yuklab olinib Telegram'ga yuboriladi, qaytgan `file_id` `product_cache`ga
 yoziladi va undan keyin faqat shu ishlatiladi. Rasm topilmasa `image_missing=1`
 qo'yiladi — qayta urinilmaydi.
 
-Billz `main_image_url` da faqat fayl nomini beradi, shuning uchun
-`BILLZ_IMAGE_BASE_URL` sozlanmaguncha kartalar **matn ko'rinishida** chiqadi.
-Qolgan hamma narsa (nom, artikul, rang, tannarx, tavsiya, tugmalar) ishlaydi.
+Manzil `/v2/products` javobidagi **`main_image_url_full`** dan olinadi — u
+allaqachon to'liq URL va hech qanday sozlama talab qilmaydi. `BILLZ_IMAGE_BASE_URL`
+faqat zaxira bo'lib qoldi (namunada 300 tovardan 265 tasida to'liq manzil bor;
+qolganlarida rasm umuman yo'q).
 
 **Rasm ↔ matn almashinuvi.** Telegram matnli xabarni rasmli xabarga tahrirlay
 olmaydi. `card_msg` jadvali oxirgi kartaning turini eslab qoladi; tur o'zgarsa
@@ -192,9 +285,11 @@ mumkin — probe'ni birinchi bo'lib ishlating.
 |---|---|---|
 | **Rang** | `product_attributes[]` | `custom_fields` → **`"Цвет"`**. `product_attributes` hamma joyda bo'sh |
 | **Podkategoriya / Tur** | `level_2` | `custom_fields` → `"Подкатегория"` / `"Вид"` |
+| **Material** | — | `custom_fields` → `"Материал"`; `"Комбинация"` ni `"Описание"` ochadi (`Замш/Кожа`) |
 | **Sotuv javobi kaliti** | `rows` | `products_stats_by_date` |
 | **Tannarx** | `/v2/products` → `supply_price` | U yerda **0**. Ishonchlisi transferdagi `sum_supply_price / sent_quantity` (u `display_currency=UZS` bilan so'raladi) |
-| **Rasm** | to'liq URL | faqat fayl nomi (`<uuid>.jpg`) — `BILLZ_IMAGE_BASE_URL` kerak |
+| **Rasm** | `main_image_url` | u faqat fayl nomi (`<uuid>.jpg`); yonidagi **`main_image_url_full`** to'liq manzil beradi |
+| **Tovar nomi** | model nomi | tur nomi: 956 artikulga atigi **84 xil nom** (`Кеды-Casual` ni 33 ta artikul baham ko'radi). Modelni ajratadigan maydon — **`brand_name`** |
 | **Kategoriya nomlari** | — | **kirill**: `Поясные одежды`, `Плечевые одежды`, `Верхняя одежда`, `Обувь` |
 
 Yana ikkita muhim nuqta:
@@ -260,8 +355,13 @@ Shundan uchta qaror kelib chiqadi:
 | `BILLZ_PAGE_LIMIT=1000` | Katta sahifa deyarli bepul — so'rovlar soni yarmiga tushadi |
 | `BILLZ_CONCURRENCY=4` | Sahifalar guruh-guruh so'raladi. Tezlik chegarasini **oshirmaydi** (token-bucket baribir 1.5 rps da ushlab turadi) — faqat Billz javobini kutish vaqtlari ustma-ust tushadi. Aks holda bot 0.3 rps da ishlaydi, Billz ruxsat bergan 2 dan olti barobar kam |
 | `STOCK_REFRESH_HOURS=6` | Qoldiq hisoboti sahifalarning ~57% i, lekin faqat "boshqa filialda bormi?" uchun kerak — bir necha soatlik eskilik zarar qilmaydi |
+| Kunlar parallel | Hisobotlar kun-kun so'raladi (jonli ma'lumot sababli), va kunlar bir-biriga bog'liq emas. Ilgari ular ketma-ket kutilardi va tekshiruv vaqtining yarmi shunga ketardi |
+| `_MAX_INFLIGHT=12` | Kunlar parallel bo'lgach ochiq so'rovlar soni portlamasligi uchun umumiy chegara. Token-bucket tezlikni baribir 1.5 rps da ushlab turadi |
 
-Natija (kunlik run, katalog keshda): **208s → 69s**.
+Natija (o'lchov, bir xil 94 so'rov, bir xil 127 nomzod): **168s → 81s**.
+Nazariy chegara — 94 / 1.5 rps = 63s, ya'ni endi deyarli tezlik chegarasida.
+Bundan tezroq qilishning yagona yo'li — so'rovlar sonini kamaytirish
+(masalan `STOCK_REFRESH_HOURS` ni oshirish: qoldiq 94 so'rovdan 28 tasi).
 
 ### Katalog to'liq tortilmaydi
 
@@ -278,8 +378,18 @@ python scripts/billz_probe.py --out var/probe
 ```
 
 Har bir endpoint'dan bitta kichik sahifa olinadi va JSON qilib saqlanadi.
-Bundan tashqari bot ishlaganda barcha xom javoblar `billz_raw` jadvaliga
+Bundan tashqari bot ishlaganda **xato** javoblar `billz_raw` jadvaliga
 yoziladi (`RAW_RETENTION_DAYS` kundan keyin tozalanadi).
+
+⚠️ Muvaffaqiyatli javoblar ATAYLAB saqlanmaydi: bitta hisobot sahifasi
+~100 KB, va bir kunlik sinovda `billz_raw` 168 MB bo'lgan — butun bazaning
+93% i, hammasi `HTTP 200`. Muammo chiqqanda kerak bo'ladigani xato javob.
+
+Billz javob shakli o'zgarganini tekshirish kerak bo'lsa, vaqtincha:
+
+```
+BILLZ_RAW_LOG_ALL=true
+```
 
 ## Testlar
 
@@ -319,7 +429,7 @@ SQLite, `var/povtor.db` (WAL rejimi). Asosiy jadvallar:
 | `card_msg` | Kartaning oxirgi turi (rasmli/matnli) |
 | `announced_arrival` | E'lon idempotentligi |
 | `ref` | Uzun nomlar → qisqa int ID (callback_data 64 bayt chegarasi) |
-| `billz_raw` | Xom API javoblari (debug) |
+| `billz_raw` | **Faqat XATO** API javoblari (`HTTP >= 400`) |
 | `kv` | Token, refresh_token, muddat |
 
 Sxema `povtor_bot/db/schema.sql` da, `CREATE TABLE IF NOT EXISTS` bilan —

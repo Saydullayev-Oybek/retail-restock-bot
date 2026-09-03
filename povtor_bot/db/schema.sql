@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS candidate (
     subcategory       TEXT    NOT NULL DEFAULT '',  -- podkategoriya (Рубашка с дл/р...)
     kind              TEXT    NOT NULL DEFAULT '',  -- Вид / Tur (Однотонный, Полоска...)
     product_name      TEXT    NOT NULL DEFAULT '',
+    -- Brend va material: bu akkauntda product_name model nomi emas, tur nomi
+    -- ("Кеды-Casual" ni 33 ta artikul baham ko'radi). Ikki kartani matn bilan
+    -- ajratadigan yagona maydon — brend.
+    brand             TEXT    NOT NULL DEFAULT '',
+    material          TEXT    NOT NULL DEFAULT '',
     sku               TEXT    NOT NULL,          -- artikul
     color             TEXT    NOT NULL DEFAULT '',
     supplier          TEXT    NOT NULL DEFAULT '',
@@ -34,10 +39,30 @@ CREATE TABLE IF NOT EXISTS candidate (
     recommended_qty   INTEGER NOT NULL,
     note              TEXT    NOT NULL DEFAULT '',  -- Izoh matni
     arrived_date      TEXT    NOT NULL,             -- skladdan kelgan sana
+    -- Band QAYSI OYNA bilan topilgani. Menejer /tekshir da oynani o'zgartira
+    -- oladi, shuning uchun "eskirgan" belgisi umumiy sozlamaga emas, aynan
+    -- shu bandni topgan oynaga solishtiriladi.
+    window_days       INTEGER NOT NULL DEFAULT 5,
+    -- Band OXIRGI marta qaysi tekshiruvda topilgani (tekshiruv raqami).
+    -- Menyu faqat eng oxirgi tekshiruv natijasini ko'rsatadi: menejer
+    -- qoidani o'zi tanlagan ekan, ro'yxat aynan shu qoidaga javob berishi
+    -- kerak. Aks holda eski tekshiruvlar natijasi ustma-ust to'planadi.
+    last_run          INTEGER NOT NULL DEFAULT 0,
 
     status            TEXT    NOT NULL DEFAULT 'pending'
                               CHECK (status IN ('pending', 'taken', 'not_found')),
     transfer_hint     TEXT    NOT NULL DEFAULT '',  -- "BOZORDA YO'Q" da: qayerdan olsa bo'ladi
+    -- Shu (filial, artikul, rang) uchun YANGI partiya kelgan sana.
+    -- To'ldirilgan bo'lsa band menyudan chiqadi: ehtiyoj allaqachon qondirilgan,
+    -- va uning raqamlari eski partiyaga tegishli. Aks holda bot "yana ol" deb
+    -- turaverardi, sklad esa allaqachon yuborgan bo'lardi.
+    superseded_at     TEXT,
+    -- "BOZORDA YO'Q" javobi FAQAT o'sha kunga tegishli: ertaga bozorda
+    -- paydo bo'lishi mumkin. Shuning uchun keyingi kungi tekshiruv bunday
+    -- bandni qayta ochadi va shu ustunga belgi qo'yadi — menejer bu band
+    -- nega qaytganini bilib tursin. "OLINDI" esa hech qachon qaytmaydi:
+    -- u yerda ehtiyoj haqiqatan qondirilgan.
+    reopened_at       TEXT,
     answered_by       INTEGER,
     answered_at       TEXT,
     created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -72,6 +97,8 @@ CREATE TABLE IF NOT EXISTS product_cache (
     category_group  TEXT NOT NULL DEFAULT '',
     subcategory     TEXT NOT NULL DEFAULT '',
     kind            TEXT NOT NULL DEFAULT '',
+    brand           TEXT NOT NULL DEFAULT '',
+    material        TEXT NOT NULL DEFAULT '',
     supplier        TEXT NOT NULL DEFAULT '',
     image_url       TEXT NOT NULL DEFAULT '',
     -- Billz CDN'dan to'g'ridan-to'g'ri ko'rsatish taqiqlangan, shuning uchun rasm
@@ -99,10 +126,12 @@ CREATE TABLE IF NOT EXISTS product_variant (
     color          TEXT NOT NULL DEFAULT '',
     subcategory    TEXT NOT NULL DEFAULT '',
     kind           TEXT NOT NULL DEFAULT '',
+    brand          TEXT NOT NULL DEFAULT '',
+    material       TEXT NOT NULL DEFAULT '',
     supplier       TEXT NOT NULL DEFAULT '',
     product_name   TEXT NOT NULL DEFAULT '',
     category_group TEXT NOT NULL DEFAULT '',
-    image_file     TEXT NOT NULL DEFAULT '',   -- Billz faqat fayl nomini beradi
+    image_file     TEXT NOT NULL DEFAULT '',   -- to'liq URL (main_image_url_full)
     updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_variant_sku ON product_variant (sku, color);

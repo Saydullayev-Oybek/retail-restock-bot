@@ -19,6 +19,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, Message
 
+from ..bot.keyboards import page_slice
 from ..bot.texts import card_caption
 from ..db import repo
 from . import media
@@ -29,13 +30,21 @@ log = logging.getLogger(__name__)
 _CAPTION_LIMIT = 1024
 
 
+def _caption(rows: list[Any], stale_after_days: int, page: int) -> str:
+    visible, page, pages = page_slice(rows, page)
+    return card_caption(
+        rows, stale_after_days=stale_after_days,
+        visible=visible, page=page, pages=pages,
+    )
+
+
 def _is_not_modified(exc: TelegramBadRequest) -> bool:
     return "message is not modified" in str(exc).lower()
 
 
 async def send_card(
     bot: Bot, chat_id: int, rows: list[Any], markup: InlineKeyboardMarkup,
-    *, stale_after_days: int = 0,
+    *, stale_after_days: int = 0, page: int = 0,
 ) -> Message | None:
     """Yangi karta yuboradi (rasm bilan yoki matn sifatida).
 
@@ -46,7 +55,7 @@ async def send_card(
     if not rows:
         return None
     sku, color = rows[0]["sku"], rows[0]["color"]
-    caption = card_caption(rows, stale_after_days=stale_after_days)
+    caption = _caption(rows, stale_after_days, page)
     photo = await media.resolve_photo(sku, color)
 
     if photo is not None and len(caption) <= _CAPTION_LIMIT:
@@ -56,22 +65,44 @@ async def send_card(
             return message
         # Rasm yuborilmadi — matnga tushamiz
 
-    message = await bot.send_message(
-        chat_id, caption, reply_markup=markup, disable_web_page_preview=True
-    )
+    try:
+        message = await bot.send_message(
+            chat_id, caption, reply_markup=markup, disable_web_page_preview=True
+        )
+    except TelegramBadRequest as exc:
+        # Jim yiqilish eng yomoni: menejer tugma bosdi, hech nima bo'lmadi va
+        # u botni "buzilgan" deb hisoblaydi. Sababni ko'rsatib qo'yamiz.
+        log.error("Karta yuborilmadi (%s): %s", sku, exc)
+        await _report_failure(bot, chat_id, sku, exc)
+        return None
     await repo.remember_card(chat_id, message.message_id, sku, has_photo=False)
     return message
 
 
+async def _report_failure(
+    bot: Bot, chat_id: int, sku: str, exc: TelegramBadRequest
+) -> None:
+    """Karta ochilmaganini menejerga tushunarli qilib aytadi."""
+    try:
+        await bot.send_message(
+            chat_id,
+            f"⚠️ <b>{sku}</b> kartasi ochilmadi.\n"
+            f"<code>{str(exc)[:200]}</code>\n\n"
+            "<i>Administratorga ayting.</i>",
+        )
+    except TelegramBadRequest:
+        log.error("Xato xabari ham yuborilmadi: chat=%s", chat_id)
+
+
 async def update_card(
     bot: Bot, chat_id: int, message_id: int, rows: list[Any],
-    markup: InlineKeyboardMarkup, *, stale_after_days: int = 0,
+    markup: InlineKeyboardMarkup, *, stale_after_days: int = 0, page: int = 0,
 ) -> None:
     """Mavjud kartani yangilaydi; tur mos kelmasa qayta yuboradi."""
     if not rows:
         return
     sku, color = rows[0]["sku"], rows[0]["color"]
-    caption = card_caption(rows, stale_after_days=stale_after_days)
+    caption = _caption(rows, stale_after_days, page)
 
     known = await repo.get_card(chat_id, message_id)
     had_photo = bool(known["has_photo"]) if known else False
@@ -83,7 +114,8 @@ async def update_card(
     if had_photo != wants_photo:
         # Tur o'zgardi — tahrirlab bo'lmaydi, eskisini o'chirib yangisini yuboramiz
         await delete_quietly(bot, chat_id, message_id)
-        await send_card(bot, chat_id, rows, markup, stale_after_days=stale_after_days)
+        await send_card(bot, chat_id, rows, markup,
+                        stale_after_days=stale_after_days, page=page)
         return
 
     try:
@@ -102,7 +134,8 @@ async def update_card(
             return   # bir xil mazmun — hech narsa qilinmaydi
         log.warning("Karta tahrirlanmadi, qayta yuboriladi: %s", exc)
         await delete_quietly(bot, chat_id, message_id)
-        await send_card(bot, chat_id, rows, markup, stale_after_days=stale_after_days)
+        await send_card(bot, chat_id, rows, markup,
+                        stale_after_days=stale_after_days, page=page)
 
 
 async def _send_photo(

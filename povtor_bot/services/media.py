@@ -5,6 +5,9 @@ ko'rsatishni TAQIQLAYDI. Shu sababli URL Telegram'ga uzatilmaydi: rasm bir
 marta yuklab olinadi, Telegram'ga bayt sifatida yuboriladi, qaytgan file_id
 saqlanadi va undan keyin faqat shu ishlatiladi.
 
+Manzil `/v2/products` javobidagi `main_image_url_full` dan keladi — qo'shimcha
+sozlama talab qilmaydi.
+
 Yon foydasi — taskdagi "birinchi so'ralganda topilmasa keyingi safar qayta
 so'ramaslik" talabi ham shu kesh bilan qoplanadi.
 """
@@ -43,9 +46,9 @@ async def resolve_photo(sku: str, color: str) -> str | bytes | None:
 
     url = full_image_url(cached["image_url"])
     if not url:
-        # Rasm nomi bor, lekin BILLZ_IMAGE_BASE_URL sozlanmagan bo'lsa ham shu yerga
-        # tushamiz — bunda "rasm yo'q" deb belgilamaymiz, chunki sozlama qo'shilishi
-        # bilan rasm paydo bo'lishi kerak
+        # Keshda faqat fayl nomi turgan (migratsiyagacha yozilgan) qatorlar ham
+        # shu yerga tushadi — ularni "rasmsiz" deb belgilamaymiz: artikul
+        # katalogdan qayta o'qilgach to'liq manzil keladi
         if not cached["image_url"]:
             await repo.mark_image_missing(sku, color)
         return None
@@ -61,9 +64,10 @@ async def resolve_photo(sku: str, color: str) -> str | bytes | None:
 def full_image_url(image_ref: str) -> str:
     """Billz qaytargan qiymatdan to'liq HTTP manzil yasaydi.
 
-    Billz `main_image_url` da faqat fayl nomini beradi ("<uuid>.jpg"), shuning
-    uchun BILLZ_IMAGE_BASE_URL kerak. Ba'zi akkauntlarda to'liq manzil kelishi
-    ham mumkin — u holda o'zgartirilmaydi.
+    Odatda gateway `main_image_url_full` ni saqlaydi — u allaqachon to'liq
+    manzil va shundayligicha qaytariladi. BILLZ_IMAGE_BASE_URL faqat zaxira:
+    javobda to'liq manzil bo'lmagan (yoki keshda eski, fayl nomi turgan)
+    holatlar uchun.
     """
     ref = (image_ref or "").strip()
     if not ref:

@@ -14,6 +14,17 @@ from __future__ import annotations
 from aiogram.filters.callback_data import CallbackData
 
 
+class CheckCB(CallbackData, prefix="chk"):
+    """Tekshiruv parametrlari.
+
+    Ikki qadamli tanlov holati shu yerda olib yuriladi — FSM kerak emas:
+    `percent == 0` hali tanlanmagan degani (1-qadam, kun tanlandi).
+    """
+
+    days: int
+    percent: int = 0
+
+
 class CategoryCB(CallbackData, prefix="cat"):
     """1-daraja: kategoriya tanlandi."""
 
@@ -28,11 +39,17 @@ class SupplierCB(CallbackData, prefix="sup"):
 
 
 class SkuCB(CallbackData, prefix="art"):
-    """3-daraja: artikul tanlandi -> karta ochiladi."""
+    """3-daraja: artikul tanlandi -> karta ochiladi.
+
+    `page` — karta sahifasi. Bir artikulda 35+ band bo'lsa (7 filial x 5 rang)
+    Telegram xabarni butunlay rad etadi (tugma limiti 100), shuning uchun
+    karta sahifalarga bo'linadi.
+    """
 
     cat: int
     sup: int
     ref: int
+    page: int = 0
 
 
 class AnswerCB(CallbackData, prefix="ans"):
@@ -46,6 +63,7 @@ class AnswerCB(CallbackData, prefix="ans"):
     act: str
     cat: int
     sup: int
+    page: int = 0
 
 
 class NavCB(CallbackData, prefix="nav"):

@@ -16,8 +16,27 @@ Qoida (POVTOR_2026-08-20.xlsx dagi 128 qatorning hammasiga mos keladi):
     Nomzod  <=>  base_qty >= MIN_BASE_QTY
              VA  o'tgan kun <= WINDOW_DAYS
              VA  percent >= PERCENT_THRESHOLD
-    ishonchli <=>  sold_qty >= CONFIDENT_MIN_SOLD
-               VA  (percent >= HIGH_PERCENT  YOKI  days_to_50 <= CONFIDENT_MAX_DAYS)
+
+    Daraja ikki xil qoida bilan aniqlanishi mumkin (GRADE_RULE):
+
+    "speed" — TEXNIK TOPSHIRIQDAGI qoida (sukut bo'yicha):
+        "Qancha tezroq 50%ga yetgan bo'lsa, shuncha ishonchli. 2 kun ichida
+        yetsa — yuqori tavsiya miqdori, 3-5 kun ichida — o'rtacha."
+
+            ishonchli <=> days_to_50 <= CONFIDENT_MAX_DAYS
+
+    "speed_and_volume" — namuna POVTOR faylidan teskari muhandislik qilingan:
+
+            ishonchli <=>  sold_qty >= CONFIDENT_MIN_SOLD
+                       VA  (percent >= HIGH_PERCENT
+                            YOKI days_to_50 <= CONFIDENT_MAX_DAYS)
+
+        Bu variant namuna fayldagi 128 qatorning hammasiga mos keladi,
+        "speed" esa 28 tasida farq qiladi — chunki haqiqiy jarayon tezlikdan
+        tashqari HAJMNI ham hisobga olar ekan (6 tadan 6 tasi 3 kunda
+        sotilishi 5 tadan 3 tasi 2 kunda sotilishidan kuchliroq signal).
+
+    Loyiha egasi texnik topshiriqni asos qilib tanladi.
 """
 
 from __future__ import annotations
@@ -46,15 +65,18 @@ class RuleConfig:
     # Namuna POVTOR faylida Asos hech qachon 5 dan kichik emas (74/128 aynan 5):
     # 1-2 dona kelgan tovar "tez sotilyapti" degan xulosaga asos bo'lmaydi.
     min_base_qty: int = 5
-    confident_max_days: int = 3
+    # Texnik topshiriq: "2 kun ichida yetsa — yuqori tavsiya miqdori"
+    confident_max_days: int = 2
     confident_min_sold: int = 4
     qty_confident: int = 10
     qty_normal: int = 5
     high_percent: float = 80.0
     allowed_category_groups: tuple[str, ...] = ()
-    # True bo'lsa: yuqori foiz sold_qty shartini chetlab o'tadi (A varianti).
-    # Default False (B varianti) — kichik partiyada 100% sotilishi ishonch bermaydi.
+    # True bo'lsa: yuqori foiz sold_qty shartini chetlab o'tadi.
     high_percent_overrides_min_sold: bool = False
+    # "speed" — texnik topshiriqdagi qoida (faqat tezlik).
+    # "speed_and_volume" — namuna Excel'dan olingan (tezlik + hajm).
+    grade_rule: str = "speed"
 
 
 def round_percent(sold: int, base: int) -> float:
@@ -88,24 +110,20 @@ def days_to_reach(
 
 
 def grade_of(days_to_50: int, sold_qty: int, percent: float, cfg: RuleConfig) -> str:
-    """Daraja: yetarli hajmda sotilgan VA (tez yoki ko'p) bo'lsa 'ishonchli'.
+    """Daraja — qaysi qoida bilan hisoblanishi cfg.grade_rule ga bog'liq.
 
-    Ikki signal ishonch beradi:
-      * tezlik  — 50% ga confident_max_days ichida yetgan;
-      * hajm    — umumiy foiz high_percent dan oshgan.
-    Ikkalasi ham confident_min_sold donalik minimal ostonadan o'tishi shart:
-    5 dan 3 tasi 3 kunda sotilishi 11 dan 7 tasi 3 kunda sotilishi bilan bir xil
-    ishonch bermaydi — kichik partiyada tasodif ulushi katta.
-
-    Bu qoida namuna POVTOR faylidagi 128 qatorning hammasiga mos keladi
-    (tests/fixtures/golden_rules.json).
+    Modul sarlavhasidagi izohga qarang: "speed" (texnik topshiriq) yoki
+    "speed_and_volume" (namuna Excel'dan olingan).
     """
+    if cfg.grade_rule == "speed":
+        # Texnik topshiriq: faqat 50%ga yetish tezligi muhim
+        return GRADE_CONFIDENT if days_to_50 <= cfg.confident_max_days else GRADE_NORMAL
+
     fast_or_big = percent >= cfg.high_percent or days_to_50 <= cfg.confident_max_days
     if not fast_or_big:
         return GRADE_NORMAL
     if sold_qty >= cfg.confident_min_sold:
         return GRADE_CONFIDENT
-    # A varianti: yuqori foiz minimal ostonani bekor qiladi
     if cfg.high_percent_overrides_min_sold and percent >= cfg.high_percent:
         return GRADE_CONFIDENT
     return GRADE_NORMAL
@@ -293,12 +311,15 @@ def detect_candidates(
                 subcategory=info.subcategory if info else "",
                 kind=info.kind if info else "",
                 product_name=(info.name if info else "") or head.product_name,
+                brand=info.brand if info else "",
+                material=info.material if info else "",
                 supplier=(info.supplier if info else "") or head.supplier,
                 product_id=(info.product_id if info else "") or head.product_id,
                 image_url=info.image_file if info else "",
                 supply_price=supply_price,
                 supply_currency=supply_currency,
                 price_uzs=to_uzs(supply_price, supply_currency, usd_rate),
+                window_days=cfg.window_days,
             )
         )
 

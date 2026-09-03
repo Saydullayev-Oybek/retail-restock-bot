@@ -20,7 +20,15 @@ from povtor_bot.core.rules import RuleConfig
 GOLDEN = json.loads(
     (Path(__file__).parent / "fixtures" / "golden_rules.json").read_text(encoding="utf-8")
 )
+
+# Amaldagi qoida — texnik topshiriqdagi: daraja faqat 50%ga yetish
+# TEZLIGI bilan aniqlanadi (2 kun ichida -> ishonchli).
 CFG = RuleConfig()
+
+# Namuna POVTOR faylidan teskari muhandislik qilingan qoida. Loyiha egasi
+# texnik topshiriqni tanladi, lekin bu variant ham qo'llab-quvvatlanadi va
+# oltin dataset aynan uni tekshiradi.
+CFG_EXCEL = RuleConfig(grade_rule="speed_and_volume", confident_max_days=3)
 
 
 def _daily_reaching_50_on(base: int, sold: int, days_to_50: int) -> list[int]:
@@ -48,14 +56,20 @@ def _daily_reaching_50_on(base: int, sold: int, days_to_50: int) -> list[int]:
 
 @pytest.mark.parametrize("row", GOLDEN, ids=lambda r: f"{r['base_qty']}/{r['sold_qty']}d{r['days_to_50']}")
 def test_golden_dataset(row: dict) -> None:
-    """Har bir haqiqiy qator uchun daraja, tavsiya va izoh mos kelishi kerak."""
-    grade = rules.grade_of(row["days_to_50"], row["sold_qty"], row["percent"], CFG)
+    """Namuna POVTOR faylining har bir qatori "speed_and_volume" rejimiga mos.
+
+    Bu dataset — hozirgi qo'lda ishlaydigan jarayonning haqiqiy natijasi.
+    U texnik topshiriqdagi qoidadan 28 qatorda farq qiladi, chunki amaldagi
+    jarayon tezlikdan tashqari HAJMNI ham hisobga olar ekan.
+    """
+    grade = rules.grade_of(row["days_to_50"], row["sold_qty"], row["percent"], CFG_EXCEL)
     assert grade == row["grade"]
-    assert rules.recommended_qty(grade, CFG) == row["recommended_qty"]
+    assert rules.recommended_qty(grade, CFG_EXCEL) == row["recommended_qty"]
     assert rules.round_percent(row["sold_qty"], row["base_qty"]) == row["percent"]
     assert (
-        rules.build_note(row["percent"], grade, row["days_to_50"], row["sold_qty"], CFG)
-        == row["note"]
+        rules.build_note(
+            row["percent"], grade, row["days_to_50"], row["sold_qty"], CFG_EXCEL
+        ) == row["note"]
     )
 
 
@@ -67,7 +81,7 @@ def test_evaluate_end_to_end(row: dict) -> None:
         base_qty=row["base_qty"],
         daily_sales=daily,
         days_elapsed=len(daily) - 1,
-        cfg=CFG,
+        cfg=CFG_EXCEL,
     )
     assert verdict is not None, "haqiqiy fayldagi qator nomzod bo'lishi shart"
     assert verdict["grade"] == row["grade"]
@@ -104,25 +118,56 @@ def test_no_sales_is_skipped() -> None:
     assert rules.evaluate(base_qty=5, daily_sales=[0, 0], days_elapsed=1, cfg=CFG) is None
 
 
-def test_confident_requires_minimum_volume() -> None:
-    """kun<=3 bo'lsa ham sotilgan<4 bo'lsa 'oddiy' — namuna fayldagi asosiy nozik joy."""
-    assert rules.grade_of(days_to_50=3, sold_qty=3, percent=60.0, cfg=CFG) == GRADE_NORMAL
-    assert rules.grade_of(days_to_50=3, sold_qty=4, percent=66.7, cfg=CFG) == GRADE_CONFIDENT
+class TestSpecGradeRule:
+    """Texnik topshiriqdagi qoida — AMALDAGI sukut.
+
+        "Qancha tezroq 50%ga yetgan bo'lsa, shuncha ishonchli. 2 kun ichida
+        yetsa — yuqori tavsiya miqdori, 3-5 kun ichida — o'rtacha."
+    """
+
+    @pytest.mark.parametrize("kun, kutilgan", [
+        (0, GRADE_CONFIDENT), (1, GRADE_CONFIDENT), (2, GRADE_CONFIDENT),
+        (3, GRADE_NORMAL), (4, GRADE_NORMAL), (5, GRADE_NORMAL),
+    ])
+    def test_only_speed_matters(self, kun: int, kutilgan: str) -> None:
+        assert rules.grade_of(kun, sold_qty=3, percent=60.0, cfg=CFG) == kutilgan
+
+    def test_volume_is_ignored(self) -> None:
+        """Hajm ta'sir qilmaydi — topshiriqda faqat tezlik aytilgan."""
+        assert rules.grade_of(2, sold_qty=1, percent=51.0, cfg=CFG) == GRADE_CONFIDENT
+        assert rules.grade_of(4, sold_qty=99, percent=100.0, cfg=CFG) == GRADE_NORMAL
+
+    def test_recommended_quantities(self) -> None:
+        assert rules.recommended_qty(GRADE_CONFIDENT, CFG) == 10
+        assert rules.recommended_qty(GRADE_NORMAL, CFG) == 5
 
 
-def test_high_percent_is_confident_even_when_slow() -> None:
-    """Sekin, lekin 80% dan ko'p sotilgan bo'lsa ham 'ishonchli' (asos 5 / sotilgan 4)."""
-    assert rules.grade_of(days_to_50=4, sold_qty=4, percent=80.0, cfg=CFG) == GRADE_CONFIDENT
-    # ...lekin foiz past bo'lsa sekinlik 'oddiy' qiladi
-    assert rules.grade_of(days_to_50=4, sold_qty=9, percent=75.0, cfg=CFG) == GRADE_NORMAL
+class TestExcelGradeRule:
+    """Namuna Excel'dan olingan qoida — ixtiyoriy rejim."""
+
+    def test_volume_guard(self) -> None:
+        assert rules.grade_of(3, sold_qty=3, percent=60.0, cfg=CFG_EXCEL) == GRADE_NORMAL
+        assert rules.grade_of(3, sold_qty=4, percent=66.7, cfg=CFG_EXCEL) == GRADE_CONFIDENT
+
+    def test_high_percent_compensates_for_slowness(self) -> None:
+        assert rules.grade_of(4, sold_qty=4, percent=80.0, cfg=CFG_EXCEL) == GRADE_CONFIDENT
+        assert rules.grade_of(4, sold_qty=9, percent=75.0, cfg=CFG_EXCEL) == GRADE_NORMAL
+
+    def test_min_sold_guard_applies_to_high_percent_too(self) -> None:
+        assert rules.grade_of(0, sold_qty=2, percent=100.0, cfg=CFG_EXCEL) == GRADE_NORMAL
+        cfg_a = RuleConfig(grade_rule="speed_and_volume",
+                           high_percent_overrides_min_sold=True)
+        assert rules.grade_of(0, sold_qty=2, percent=100.0, cfg=cfg_a) == GRADE_CONFIDENT
 
 
-def test_min_sold_guard_applies_to_high_percent_too() -> None:
-    """B varianti (default): 2 donadan 2 tasi sotilgani hali 'ishonchli' emas."""
-    assert rules.grade_of(days_to_50=0, sold_qty=2, percent=100.0, cfg=CFG) == GRADE_NORMAL
-    # A variantiga o'tilsa — o'tadi
-    cfg_a = RuleConfig(high_percent_overrides_min_sold=True)
-    assert rules.grade_of(days_to_50=0, sold_qty=2, percent=100.0, cfg=cfg_a) == GRADE_CONFIDENT
+def test_two_rules_differ_on_the_real_dataset() -> None:
+    """Ikki qoida haqiqiy ma'lumotda 28 qatorda farq qiladi — bu hujjatlashtirilgan."""
+    farq = [
+        r for r in GOLDEN
+        if rules.grade_of(r["days_to_50"], r["sold_qty"], r["percent"], CFG)
+        != rules.grade_of(r["days_to_50"], r["sold_qty"], r["percent"], CFG_EXCEL)
+    ]
+    assert len(farq) == 28
 
 
 def test_days_to_reach_counts_from_arrival_day() -> None:

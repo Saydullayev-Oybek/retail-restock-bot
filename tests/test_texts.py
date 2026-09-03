@@ -6,7 +6,7 @@ belgilar uchrasa Telegram butun xabarni rad etadi va karta umuman ochilmaydi.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -20,14 +20,86 @@ TODAY = date(2026, 8, 27)
 def row(**overrides) -> dict:
     base = {
         "detected_date": TODAY.isoformat(),
+        "arrived_date": (TODAY - timedelta(days=2)).isoformat(),
         "sku": "39666", "color": "Белый", "shop_name": "ANDALUS",
         "product_name": "Рубашка с дл/р", "subcategory": "Рубашка с дл/р",
         "supplier": "ABUSAXIY 8-22 M64", "price_uzs": 145000,
         "base_qty": 5, "sold_qty": 4, "percent": 80.0, "grade": "ishonchli",
+        "days_to_50": 2, "superseded_at": None, "window_days": 5,
+        "kind": "Однотонный", "brand": "Millionaire", "material": "Хлопок",
         "recommended_qty": 10, "status": STATUS_PENDING, "transfer_hint": "",
     }
     base.update(overrides)
     return base
+
+
+class TestCardHeader:
+    """Sarlavha ikkita bir xil nomli artikulni ajrata olishi kerak.
+
+    Billz'da `product_name` model nomi emas, tur nomi: 956 artikulga atigi
+    84 xil nom to'g'ri keladi. Brendsiz Salvatini va Loro Piana kedilari
+    kartada bir xil ko'rinardi.
+    """
+
+    def test_brand_follows_the_name(self) -> None:
+        text = texts.card_caption(
+            [row(product_name="Кеды-Casual", brand="Salvatini")], today=TODAY
+        )
+        assert "Кеды-Casual · Salvatini" in text
+
+    def test_two_articles_differ_by_brand(self) -> None:
+        bittasi = texts.card_caption(
+            [row(sku="50058", product_name="Кеды-Casual", brand="Salvatini")], today=TODAY
+        )
+        boshqasi = texts.card_caption(
+            [row(sku="50051", product_name="Кеды-Casual", brand="Loro Piana")], today=TODAY
+        )
+        assert bittasi.splitlines()[0] != boshqasi.splitlines()[0]
+
+    def test_no_brand_leaves_the_name_alone(self) -> None:
+        text = texts.card_caption([row(product_name="Кеды-Casual", brand="")], today=TODAY)
+        assert "<b>Кеды-Casual</b>" in text
+
+    def test_kind_and_material_line(self) -> None:
+        text = texts.card_caption(
+            [row(kind="Шнурок", material="Комбинация · Замш/Кожа")], today=TODAY
+        )
+        assert "Tur: Шнурок · Комбинация · Замш/Кожа" in text
+
+    def test_kind_alone(self) -> None:
+        text = texts.card_caption([row(kind="Шнурок", material="")], today=TODAY)
+        assert "Tur: Шнурок" in text
+
+    def test_no_kind_no_material_no_line(self) -> None:
+        text = texts.card_caption([row(kind="", material="")], today=TODAY)
+        assert "Tur:" not in text
+
+    def test_subcategory_equal_to_name_is_dropped(self) -> None:
+        """Podkategoriya nom bilan aynan bir xil bo'lsa takrorlash foydasiz."""
+        text = texts.card_caption(
+            [row(product_name="Кеды-Casual", subcategory="Кеды-Casual")], today=TODAY
+        )
+        assert "Bo'lim:" not in text
+
+    def test_subcategory_shown_when_it_differs(self) -> None:
+        text = texts.card_caption(
+            [row(product_name="Рубашка класс.дл/р", subcategory="Рубашка с дл/р")],
+            today=TODAY,
+        )
+        assert "Bo'lim: Рубашка с дл/р" in text
+
+    def test_missing_columns_do_not_break_old_rows(self) -> None:
+        """Migratsiyagacha yozilgan qatorlarda brand/material ustuni yo'q."""
+        eski = row()
+        eski.pop("brand", None)
+        eski.pop("material", None)
+        eski.pop("kind", None)
+        text = texts.card_caption([eski], today=TODAY)
+        assert "39666" in text and "Tur:" not in text
+
+    def test_brand_is_escaped(self) -> None:
+        text = texts.card_caption([row(brand="A & B")], today=TODAY)
+        assert "A &amp; B" in text
 
 
 class TestEscaping:
@@ -83,6 +155,24 @@ class TestCardCaption:
     def test_percent_has_no_trailing_zero(self) -> None:
         assert "(80%)" in texts.card_caption([row(percent=80.0)], today=TODAY)
         assert "(66.7%)" in texts.card_caption([row(percent=66.7)], today=TODAY)
+
+    def test_shows_arrival_date_and_speed(self) -> None:
+        """Buyer bozorda: qachon kelgan, qanchasi ketgan, qanchalik tez."""
+        text = texts.card_caption(
+            [row(arrived_date="2026-08-22", base_qty=5, sold_qty=4,
+                 percent=80.0, days_to_50=2)],
+            today=TODAY,
+        )
+        assert "22-avg keldi: 5 dona" in text     # qachon va nechta keldi
+        assert "5 kunda 4 sotildi" in text        # qancha vaqtda qancha ketdi
+        assert "(80%)" in text
+        assert "50%ga 2-kunda" in text            # tezlik
+
+    def test_same_day_arrival(self) -> None:
+        text = texts.card_caption(
+            [row(arrived_date=TODAY.isoformat())], today=TODAY
+        )
+        assert "shu kuni" in text
 
     def test_empty_rows(self) -> None:
         assert texts.card_caption([]) == "Band topilmadi."
@@ -141,6 +231,46 @@ class TestCheckReport:
         text = texts.check_report(self.Result(total_found=5, new_count=0))
         assert "Yangi nomzod yo'q" in text
 
+    def test_numbers_add_up(self) -> None:
+        """Topilgan = menyuda + yangi partiya + javob berilgan.
+
+        Menejer uch marta "nega 121 topildi, menyuda 117?" deb so'radi —
+        hisobot sababni o'zi ko'rsatishi kerak.
+        """
+        text = texts.check_report(self.Result(
+            total_found=121, new_count=1,
+            open_now=117, superseded=2, already_answered=2,
+        ))
+        assert "Topilgan nomzodlar: <b>121</b>" in text
+        assert "menyuda: <b>117</b>" in text
+        assert "yangi partiya keldi: <b>2</b>" in text
+        assert "javob bergansiz: <b>2</b>" in text
+
+    def test_zero_lines_are_hidden(self) -> None:
+        """Hech nima yopilmagan kunda ortiqcha qator chiqmasin."""
+        text = texts.check_report(self.Result(total_found=40, new_count=4, open_now=40))
+        assert "menyuda: <b>40</b>" in text
+        assert "yangi partiya" not in text and "javob bergansiz" not in text
+
+    def test_stock_is_shown_in_units_not_rows(self) -> None:
+        """16 148 qator = 92 289 dona — menejer birinchisini tovar soni deb o'qidi."""
+        text = texts.check_report(self.Result(
+            stock_rows=16148, stock_units=92289, stock_skus=5196, stock_age_hours=0.0
+        ))
+        assert "92 289</b> dona · 5 196 artikul (yangilandi)" in text
+        assert "16148" not in text
+
+    def test_stale_stock_says_how_old(self) -> None:
+        text = texts.check_report(self.Result(
+            stock_rows=16148, stock_units=92289, stock_skus=5196, stock_age_hours=7.6
+        ))
+        assert "8 soat oldingi" in text
+
+    def test_falls_back_to_row_count_without_summary(self) -> None:
+        """Eski natija obyektida yangi maydonlar bo'lmasligi mumkin."""
+        text = texts.check_report(self.Result(stock_rows=900))
+        assert "Qoldiq qatorlari: 900" in text
+
 
 class TestAgeLabel:
     """Bandning yoshi.
@@ -162,18 +292,40 @@ class TestAgeLabel:
     def test_label(self, detected: str, expected: str) -> None:
         assert texts.age_label(detected, TODAY) == expected
 
-    def test_stale_items_are_flagged(self) -> None:
-        """Oynadan chiqqan band ajratib ko'rsatiladi — u endi qayta aniqlanmaydi."""
-        assert texts.age_label("2026-08-22", TODAY, stale_after_days=5) == "5 kun oldin"
-        assert texts.age_label("2026-08-21", TODAY, stale_after_days=5) == "⚠️ 6 kun oldin"
+    def test_stale_is_decided_by_ARRIVAL_not_detection(self) -> None:
+        """Statistika partiya oynadan chiqqanda muzlaydi, aniqlangan kunda emas.
+
+        Band KECHA aniqlangan bo'lishi, lekin partiyasi bir hafta oldin
+        kelgan bo'lishi mumkin — uning raqamlari allaqachon eskirgan.
+        Real holat: 104 banddan 82 tasi aynan shunday edi.
+        """
+        # kecha aniqlangan, lekin partiya 6 kunlik -> ESKIRGAN.
+        # Kun soni takrorlanmaydi — kelgan sana kartada allaqachon bor.
+        assert texts.age_label(
+            "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-21"
+        ) == "⚠️ eskirgan"
+        # kecha aniqlangan, partiya 2 kunlik -> toza
+        assert texts.age_label(
+            "2026-08-26", TODAY, stale_after_days=5, arrived="2026-08-25"
+        ) == "kecha"
+
+    def test_today_but_stale_still_warns(self) -> None:
+        assert texts.age_label(
+            "2026-08-27", TODAY, stale_after_days=5, arrived="2026-08-20"
+        ) == "⚠️ eskirgan"
 
     def test_no_flag_without_threshold(self) -> None:
         assert texts.age_label("2026-08-01", TODAY) == "26 kun oldin"
+        assert texts.age_label("2026-08-01", TODAY, arrived="2026-01-01") == "26 kun oldin"
 
     def test_future_or_broken_date(self) -> None:
         assert texts.age_label("2026-09-01", TODAY) == ""
         assert texts.age_label("", TODAY) == ""
         assert texts.age_label("aniqmas", TODAY) == ""
+        # buzilgan arrived ogohlantirish bermaydi, lekin yiqilmaydi ham
+        assert texts.age_label(
+            "2026-08-25", TODAY, stale_after_days=5, arrived="aniqmas"
+        ) == "2 kun oldin"
 
     def test_card_shows_age_only_for_old_items(self) -> None:
         text = texts.card_caption([
@@ -186,7 +338,55 @@ class TestAgeLabel:
 
     def test_card_flags_stale_item(self) -> None:
         text = texts.card_caption(
-            [row(detected_date="2026-08-19")], today=TODAY, stale_after_days=5
+            [row(detected_date="2026-08-26", arrived_date="2026-08-19")],
+            today=TODAY, stale_after_days=5,
         )
-        assert "⚠️ 8 kun oldin" in text
+        assert "⚠️" in text and "eskirgan" in text
 
+
+
+class TestStaleUsesTheRowWindow:
+    """"Eskirgan" belgisi bandning O'Z oynasiga solishtiriladi.
+
+    Menejer 10 kunlik tekshiruv qilsa, 7 kunlik band eskirgan EMAS — u aynan
+    shu oyna uchun topilgan. Umumiy sozlamaga (5 kun) solishtirish uni
+    noto'g'ri belgilagan bo'lardi.
+    """
+
+    def test_wide_window_row_is_not_stale(self) -> None:
+        matn = texts.card_caption(
+            [row(arrived_date="2026-08-20", window_days=10)],
+            today=TODAY, stale_after_days=5,
+        )
+        assert "⚠️" not in matn
+
+    def test_narrow_window_row_is_stale(self) -> None:
+        matn = texts.card_caption(
+            [row(arrived_date="2026-08-20", window_days=3)],
+            today=TODAY, stale_after_days=5,
+        )
+        assert "⚠️ eskirgan" in matn
+
+    def test_missing_column_falls_back(self) -> None:
+        """Migratsiyadan oldingi qatorlarda ustun bo'lmasligi mumkin."""
+        eski = row(arrived_date="2026-08-20")
+        eski.pop("window_days", None)
+        assert "⚠️ eskirgan" in texts.card_caption(
+            [eski], today=TODAY, stale_after_days=5
+        )
+
+
+class TestReportShowsTheRule:
+    class Result:
+        def __init__(self, **kw) -> None:
+            self.__dict__.update(
+                {"ok": True, "total_found": 5, "new_count": 1, "stock_rows": 0,
+                 "usd_rate": 0.0, "error": ""} | kw
+            )
+
+    def test_rule_is_shown_when_given(self) -> None:
+        matn = texts.check_report(self.Result(), days=7, percent=60)
+        assert "oyna 7 kun · chegara 60%" in matn
+
+    def test_omitted_when_not_given(self) -> None:
+        assert "oyna" not in texts.check_report(self.Result())

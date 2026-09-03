@@ -105,13 +105,19 @@ class TestSchedule:
 
 
 class TestDefaults:
-    def test_rule_defaults_match_sample_file(self) -> None:
+    def test_rule_defaults_match_the_specification(self) -> None:
+        """Sukut qiymatlar TEXNIK TOPSHIRIQqa mos bo'lishi kerak.
+
+            "belgilangan kun oralig'ida (masalan, 5 kun) sotilgan foiz
+             belgilangan chegaraga (masalan, 50%) yetsa — nomzod.
+             2 kun ichida yetsa — yuqori tavsiya miqdori,
+             3-5 kun ichida — o'rtacha."
+        """
         settings = build()
         assert (settings.window_days, settings.percent_threshold) == (5, 50.0)
-        assert (settings.confident_max_days, settings.confident_min_sold) == (3, 4)
+        assert settings.confident_max_days == 2          # "2 kun ichida"
         assert (settings.qty_confident, settings.qty_normal) == (10, 5)
-        assert settings.high_percent == 80.0
-        assert settings.high_percent_overrides_min_sold is False
+        assert settings.grade_rule == "speed"            # faqat tezlik
 
     def test_rate_limit_stays_below_billz_cap(self) -> None:
         """Billz 2 rps beradi; default undan past bo'lishi kerak."""

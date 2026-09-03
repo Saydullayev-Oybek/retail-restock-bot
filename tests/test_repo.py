@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from povtor_bot.core.models import STATUS_NOT_FOUND, STATUS_PENDING, STATUS_TAKEN
-from povtor_bot.db import repo
+from povtor_bot.db import conn, repo
 
 from .conftest import TODAY, make_candidate
 
@@ -72,7 +73,13 @@ class TestInsertCandidates:
             make_candidate(arrived_date=TODAY, detected_date=TODAY + timedelta(days=1))
         ])
         assert yangi == 1
-        assert len(await repo.card_items("39666")) == 2
+        # Bazada ikkalasi ham bor; kartada faqat oxirgi tekshiruvniki
+        async with conn.db().execute(
+            "SELECT COUNT(*) AS n FROM candidate WHERE sku = '39666'"
+        ) as cursor:
+            assert (await cursor.fetchone())["n"] == 2
+        kartada = await repo.card_items("39666")
+        assert [r["arrived_date"] for r in kartada] == [TODAY.isoformat()]
 
     async def test_pending_statistics_are_refreshed(self) -> None:
         """Javob berilmagan bandning sotuvi o'sib borishi kerak."""
@@ -306,3 +313,393 @@ class TestExport:
         await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
         exported = await repo.answered_for_export(date.today())
         assert [r["sku"] for r in exported] == ["eski"]
+
+
+class TestExportUsesLocalDay:
+    """Hisobot kuni MAHALLIY vaqt bo'yicha kesilishi kerak.
+
+    Baza vaqtni UTC da yozadi (`datetime('now')`), fayl nomi esa mahalliy
+    sanadan olinadi. Toshkent UTC+5 bo'lgani uchun tunda 00:00-05:00 orasida
+    berilgan javob UTC'da HALI KECHAGI kun bo'ladi va bugungi hisobotdan
+    tushib qolardi.
+    """
+
+    TASHKENT = ZoneInfo("Asia/Tashkent")
+
+    async def _javob(self, sku: str, utc_vaqt: str) -> None:
+        """Berilgan UTC vaqtida javob berilgan bandni yasaydi.
+
+        Hisobot manbai `item_event`, shuning uchun hodisaning vaqti ham
+        surilishi kerak — faqat `candidate.answered_at` yetarli emas.
+        """
+        await repo.insert_candidates([make_candidate(sku=sku)])
+        row = (await repo.card_items(sku))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        await conn.db().execute(
+            "UPDATE candidate SET answered_at = ? WHERE id = ?", (utc_vaqt, row["id"])
+        )
+        await conn.db().execute(
+            "UPDATE item_event SET created_at = ? WHERE candidate_id = ?",
+            (utc_vaqt, row["id"]),
+        )
+        await conn.db().commit()
+
+    async def test_early_morning_answer_lands_on_the_right_day(self, database) -> None:
+        # Mahalliy 3-sen 03:00 = UTC 2-sen 22:00
+        await self._javob("tunda", "2026-09-02 22:00:00")
+        uchinchi = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        ikkinchi = await repo.answered_for_export(date(2026, 9, 2), tz=self.TASHKENT)
+        assert [r["sku"] for r in uchinchi] == ["tunda"]
+        assert ikkinchi == []
+
+    async def test_late_evening_answer_stays_on_its_day(self, database) -> None:
+        # Mahalliy 3-sen 23:30 = UTC 3-sen 18:30
+        await self._javob("kechqurun", "2026-09-03 18:30:00")
+        uchinchi = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        tortinchi = await repo.answered_for_export(date(2026, 9, 4), tz=self.TASHKENT)
+        assert [r["sku"] for r in uchinchi] == ["kechqurun"]
+        assert tortinchi == []
+
+    async def test_day_boundaries_are_exact(self, database) -> None:
+        """Mahalliy 00:00 kiradi, 24:00 kirmaydi."""
+        await self._javob("boshi", "2026-09-02 19:00:00")    # mahalliy 3-sen 00:00
+        await self._javob("oxiri", "2026-09-03 18:59:59")    # mahalliy 3-sen 23:59:59
+        await self._javob("keyingi", "2026-09-03 19:00:00")  # mahalliy 4-sen 00:00
+        kun = await repo.answered_for_export(date(2026, 9, 3), tz=self.TASHKENT)
+        assert sorted(r["sku"] for r in kun) == ["boshi", "oxiri"]
+
+
+class TestCardHidesStaleItems:
+    """Karta faqat hozirgi ishni va o'tgan javoblarni ko'rsatadi.
+
+    Menejer ko'rgan holat: menyu tugmasi "(2 band)" der, karta esa uchtasini
+    ko'rsatardi — uchinchisi eski tekshiruvdan qolgan, hozirgi qoidaga
+    tushmaydigan band edi. Bunday qatorlar hech qachon o'z-o'zidan
+    yo'qolmasdi va vaqt o'tgan sari kartani chalkashtirardi.
+    """
+
+    async def _tekshiruv(self, *candidates) -> None:
+        run = await repo.next_run_id()
+        await repo.insert_candidates(list(candidates), run)
+        await repo.finish_run(run)
+
+    async def test_stale_unanswered_item_is_hidden(self, database) -> None:
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        kartada = [r["shop_id"] for r in await repo.card_items("1")]
+        assert kartada == ["s2"]
+
+    async def test_answered_item_stays_visible(self, database) -> None:
+        """Javob berilgani eski bo'lsa ham qoladi — menejer nima qilganini ko'rsin."""
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        row = (await repo.card_items("1"))[0]
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        kartada = {r["shop_id"]: r["status"] for r in await repo.card_items("1")}
+        assert kartada == {"s1": STATUS_TAKEN, "s2": STATUS_PENDING}
+
+    async def test_menu_count_matches_the_card(self, database) -> None:
+        """Menyudagi "(N band)" va kartadagi javob kutayotganlar soni bir xil."""
+        await self._tekshiruv(*[
+            make_candidate(sku="1", shop_id=f"s{i}", shop_name=f"F{i}") for i in range(3)
+        ])
+        await self._tekshiruv(*[
+            make_candidate(sku="1", shop_id=f"s{i}", shop_name=f"F{i}") for i in range(2)
+        ])
+        menyu = {r["sku"]: r["open_count"] for r in
+                 await repo.skus_with_open_counts("Poyasnaya", "Sharof M255")}
+        kartada = [r for r in await repo.card_items("1")
+                   if r["status"] == STATUS_PENDING]
+        assert menyu["1"] == len(kartada) == 2
+
+    async def test_row_survives_in_the_database(self, database) -> None:
+        """Yashirish o'chirish emas: oynani kengaytirgan tekshiruv qaytaradi."""
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s1"))
+        await self._tekshiruv(make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"))
+        assert len(await repo.card_items("1")) == 1
+
+        await self._tekshiruv(
+            make_candidate(sku="1", shop_id="s1"),
+            make_candidate(sku="1", shop_id="s2", shop_name="BERUNIY"),
+        )
+        assert len(await repo.card_items("1")) == 2
+
+
+class TestSupersedeByNewArrival:
+    """Sklad yangi partiya yuborsa eski band yopilishi kerak.
+
+    Ilgari bot bandni faqat menejer javob berganda yopardi. Natijada ikkita
+    xato holat bor edi:
+
+      * yangi partiya ham nomzod bo'lsa -> menejer bitta filial+rangni IKKI
+        MARTA ko'rib, ikki barobar buyurtma berib yuborishi mumkin edi;
+      * yangi partiya nomzod bo'lmasa (hali sotilmagan) -> bot hali ham
+        "yana N dona ol" deb turardi, sklad esa allaqachon yuborgan edi.
+    """
+
+    async def _eski(self, **kw):
+        await repo.insert_candidates([
+            make_candidate(arrived_date=TODAY - timedelta(days=6), **kw)
+        ])
+        return (await repo.card_items("39666"))[0]
+
+    async def test_older_batch_is_closed(self) -> None:
+        await self._eski()
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 1
+        assert await repo.open_count() == 0
+
+    async def test_closed_item_leaves_the_menu(self) -> None:
+        await self._eski()
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.categories_with_open_counts() == []
+
+    async def test_closed_item_stays_in_the_database(self) -> None:
+        """Band o'chirilmaydi — kartada va tarixda ko'rinib turadi."""
+        row = await self._eski()
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        saqlangan = await repo.get_candidate(row["id"])
+        assert saqlangan is not None
+        assert saqlangan["superseded_at"] == TODAY.isoformat()
+        assert saqlangan["status"] == "pending"
+
+    async def test_same_day_arrival_does_not_close(self) -> None:
+        """Faqat KEYINGI partiya yopadi — o'sha kungisi emas."""
+        await repo.insert_candidates([make_candidate(arrived_date=TODAY)])
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 0
+        assert await repo.open_count() == 1
+
+    async def test_answered_items_are_untouched(self) -> None:
+        """Menejer javob bergan band tarixda o'z holicha qolishi kerak."""
+        row = await self._eski()
+        await repo.answer_candidate(row["id"], status=STATUS_TAKEN, user_id=1)
+        yopildi = await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert yopildi == 0
+        saqlangan = await repo.get_candidate(row["id"])
+        assert saqlangan["status"] == STATUS_TAKEN
+        assert saqlangan["superseded_at"] is None
+
+    async def test_other_colors_are_not_affected(self) -> None:
+        await self._eski(color="Белый")
+        await self._eski(color="Синий")
+        await repo.supersede_by_new_arrivals(
+            [("shop1", "39666", "Белый", TODAY.isoformat())]
+        )
+        assert await repo.open_count() == 1
+
+    async def test_repeated_call_is_idempotent(self) -> None:
+        await self._eski()
+        arrivals = [("shop1", "39666", "Белый", TODAY.isoformat())]
+        assert await repo.supersede_by_new_arrivals(arrivals) == 1
+        assert await repo.supersede_by_new_arrivals(arrivals) == 0
+
+
+class TestWindowDaysMigration:
+    """`window_days` ustuni mavjud bazalarga qo'shiladi."""
+
+    async def test_column_is_added_and_rows_survive(self, tmp_path) -> None:
+        import sqlite3
+
+        from povtor_bot.db import conn
+
+        # Ustunsiz "eski" baza yasaymiz
+        path = tmp_path / "eski.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.insert_candidates([make_candidate()])
+        await conn.close()
+
+        raw = sqlite3.connect(path)
+        raw.executescript("""
+            CREATE TABLE tmp AS SELECT * FROM candidate;
+            DROP TABLE candidate;
+            CREATE TABLE candidate AS SELECT * FROM tmp;
+            DROP TABLE tmp;
+        """)
+        raw.execute("ALTER TABLE candidate DROP COLUMN window_days")
+        raw.commit()
+        assert "window_days" not in {
+            r[1] for r in raw.execute("PRAGMA table_info(candidate)")
+        }
+        raw.close()
+
+        # Ulanish migratsiyani qo'llashi kerak
+        await conn.connect(str(path))
+        try:
+            async with conn.db().execute("PRAGMA table_info(candidate)") as cur:
+                cols = {r["name"] for r in await cur.fetchall()}
+            async with conn.db().execute(
+                "SELECT COUNT(*) AS n, MIN(window_days) AS w FROM candidate"
+            ) as cur:
+                row = await cur.fetchone()
+        finally:
+            await conn.close()
+
+        assert "window_days" in cols
+        assert row["n"] == 1 and row["w"] == 5     # sukut qiymat
+
+
+class TestBrandMaterialMigration:
+    """`brand` va `material` mavjud bazalarga qo'shiladi, ma'lumot yo'qolmaydi."""
+
+    async def test_columns_are_added_and_rows_survive(self, tmp_path) -> None:
+        import sqlite3
+
+        from povtor_bot.db import conn
+
+        path = tmp_path / "eski.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.insert_candidates([make_candidate(sku="50058")])
+        await conn.close()
+
+        raw = sqlite3.connect(path)
+        for table in ("candidate", "product_cache", "product_variant"):
+            for column in ("brand", "material"):
+                raw.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        raw.commit()
+        raw.close()
+
+        await conn.connect(str(path))
+        try:
+            cols = {}
+            for table in ("candidate", "product_cache", "product_variant"):
+                async with conn.db().execute(f"PRAGMA table_info({table})") as cur:
+                    cols[table] = {r["name"] for r in await cur.fetchall()}
+            async with conn.db().execute(
+                "SELECT sku, brand, material FROM candidate"
+            ) as cur:
+                row = await cur.fetchone()
+        finally:
+            await conn.close()
+
+        for table in ("candidate", "product_cache", "product_variant"):
+            assert {"brand", "material"} <= cols[table], table
+        assert row["sku"] == "50058"
+        assert row["brand"] == "" and row["material"] == ""
+
+    async def test_stored_and_read_back(self, database) -> None:
+        await repo.insert_candidates(
+            [make_candidate(brand="Salvatini", material="Комбинация · Замш/Кожа")]
+        )
+        rows = await repo.card_items("39666")
+        assert rows[0]["brand"] == "Salvatini"
+        assert rows[0]["material"] == "Комбинация · Замш/Кожа"
+
+
+class TestImageResyncDataMigration:
+    """Rasm manzili to'liq URL'ga o'tgani uchun artikullar bir marta qayta o'qiladi."""
+
+    async def test_sku_sync_cleared_once(self, tmp_path) -> None:
+        from povtor_bot.db import conn
+
+        path = tmp_path / "resync.db"
+        await conn.close()
+        await conn.connect(str(path))
+        await repo.mark_sku_synced("39666", 3)
+        assert await repo.stale_skus(["39666"], 7) == []
+        await conn.close()
+
+        # Belgini olib tashlaymiz — migratsiya hali bajarilmagan holat
+        async def _drop_flag() -> None:
+            await conn.db().execute(
+                "DELETE FROM kv WHERE key = 'resync_2026_09_full_image_url'"
+            )
+            await conn.db().commit()
+
+        await conn.connect(str(path))
+        await _drop_flag()
+        await conn.close()
+
+        await conn.connect(str(path))
+        try:
+            assert await repo.stale_skus(["39666"], 7) == ["39666"]
+            # Ikkinchi ulanishda takrorlanmaydi
+            await repo.mark_sku_synced("39666", 3)
+        finally:
+            await conn.close()
+
+        await conn.connect(str(path))
+        try:
+            assert await repo.stale_skus(["39666"], 7) == []
+        finally:
+            await conn.close()
+
+
+class TestMenuShowsOnlyTheLastRun:
+    """Menyu OXIRGI tekshiruv natijasini ko'rsatadi.
+
+    Menejer /tekshir da qoidani (oyna, chegara) o'zi tanlaydi — ro'yxat aynan
+    shu qoidaga javob berishi kerak. Ilgari eski tekshiruvlar natijasi
+    to'planib borardi: 3 kun / 70% bilan 0 ta topilsa ham menyuda 101 ta
+    band turaverardi.
+    """
+
+    async def _run(self, *candidates):
+        run_id = await repo.next_run_id()
+        await repo.insert_candidates(list(candidates), run_id)
+        await repo.finish_run(run_id)
+        return run_id
+
+    async def test_previous_run_disappears(self) -> None:
+        await self._run(make_candidate(sku="eski"))
+        assert await repo.open_count() == 1
+
+        await self._run(make_candidate(sku="yangi"))
+        assert await repo.open_count() == 1
+        rows = await repo.categories_with_open_counts()
+        assert sum(r["open_count"] for r in rows) == 1
+
+    async def test_empty_run_empties_the_menu(self) -> None:
+        """Hech nima topilmasa menyu ham bo'sh bo'lishi kerak."""
+        await self._run(make_candidate(sku="1"), make_candidate(sku="2"))
+        assert await repo.open_count() == 2
+
+        await self._run()          # qattiq qoida, hech nima topilmadi
+        assert await repo.open_count() == 0
+        assert await repo.categories_with_open_counts() == []
+
+    async def test_item_found_again_stays(self) -> None:
+        """O'sha band qayta topilsa ro'yxatda qoladi."""
+        await self._run(make_candidate(sold_qty=3, percent=60.0))
+        await self._run(make_candidate(sold_qty=5, percent=100.0))
+        assert await repo.open_count() == 1
+        row = (await repo.card_items("39666"))[0]
+        assert row["sold_qty"] == 5           # statistikasi ham yangilandi
+
+    async def test_answered_items_are_kept_in_the_database(self) -> None:
+        """Menyudan chiqqan band YO'QOLMAYDI — javoblar va tarix qoladi."""
+        await self._run(make_candidate(sku="1"))
+        rows = await repo.card_items("1")
+        await repo.answer_candidate(rows[0]["id"], status=STATUS_TAKEN, user_id=1)
+
+        await self._run(make_candidate(sku="2"))
+        saqlangan = await repo.get_candidate(rows[0]["id"])
+        assert saqlangan is not None and saqlangan["status"] == STATUS_TAKEN
+
+    async def test_unanswered_item_returns_when_found_again(self) -> None:
+        """Kengroq qoida bilan qayta tekshirilsa eski band qaytadi."""
+        await self._run(make_candidate(sku="1"))
+        await self._run(make_candidate(sku="2"))
+        # Bazada saqlanib qoldi, lekin kartada ham, menyuda ham chiqmaydi:
+        # raqamlari eskirgan, ular asosida qaror qabul qilib bo'lmaydi
+        assert await repo.card_items("1") == []
+        assert await repo.open_count() == 1
+
+        await self._run(make_candidate(sku="1"), make_candidate(sku="2"))
+        assert await repo.open_count() == 2                              # ikkalasi qaytdi
+
+    async def test_no_run_yet_means_empty_menu(self) -> None:
+        assert await repo.current_run_id() == 0
+        assert await repo.categories_with_open_counts() == []

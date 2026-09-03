@@ -142,16 +142,26 @@ async def on_sku(
         await callback.answer()
         return
 
-    # Ro'yxat xabari matnli, karta esa rasmli bo'lishi mumkin — turi mos
-    # kelmasligi ehtimoli yuqori, shuning uchun ro'yxatni o'chirib karta yuboramiz.
-    markup = keyboards.card_kb(rows, callback_data.cat, callback_data.sup)
+    markup = keyboards.card_kb(
+        rows, callback_data.cat, callback_data.sup,
+        sku_ref=callback_data.ref, page=callback_data.page,
+    )
     message = callback.message
     if message is not None:
-        await cards.delete_quietly(bot, message.chat.id, message.message_id)
-        await cards.send_card(
-            bot, message.chat.id, rows, markup,
-            stale_after_days=settings.window_days,
-        )
+        if callback_data.page:
+            # Sahifa almashishi — karta o'z joyida yangilanadi
+            await cards.update_card(
+                bot, message.chat.id, message.message_id, rows, markup,
+                stale_after_days=settings.window_days, page=callback_data.page,
+            )
+        else:
+            # Ro'yxat xabari matnli, karta esa rasmli bo'lishi mumkin — turi mos
+            # kelmasligi ehtimoli yuqori, shuning uchun o'chirib qayta yuboramiz
+            await cards.delete_quietly(bot, message.chat.id, message.message_id)
+            await cards.send_card(
+                bot, message.chat.id, rows, markup,
+                stale_after_days=settings.window_days,
+            )
     await callback.answer()
 
 
@@ -203,10 +213,14 @@ async def on_answer(
     rows = await repo.card_items(candidate["sku"])
     message = callback.message
     if message is not None and rows:
-        markup = keyboards.card_kb(rows, callback_data.cat, callback_data.sup)
+        sku_ref = await repo.ref_id("sku", candidate["sku"])
+        markup = keyboards.card_kb(
+            rows, callback_data.cat, callback_data.sup,
+            sku_ref=sku_ref, page=callback_data.page,
+        )
         await cards.update_card(
             bot, message.chat.id, message.message_id, rows, markup,
-            stale_after_days=settings.window_days,
+            stale_after_days=settings.window_days, page=callback_data.page,
         )
     await callback.answer(notice, show_alert=bool(callback_data.act == "n" and notice))
 
