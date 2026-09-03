@@ -44,6 +44,17 @@ _MAX_PAGES = 200   # cheksiz sikldan himoya
 # token-bucket baribir ushlab turadi; faqat Billz'ning javob kutish
 # vaqtlari ustma-ust tushadi.
 _CONCURRENCY = 4
+# Bir vaqtda ochiq turadigan so'rovlarning UMUMIY chegarasi.
+#
+# Nega kerak: kunlar endi parallel so'raladi, ya'ni ichki `_paginate`
+# guruhlari ustma-ust tushadi. Chegarasiz qolsa bir zumda o'nlab so'rov
+# ochilib, Billz'ning DDoS himoyasiga tegishi mumkin.
+#
+# 12 tanlandi: token-bucket so'rovlarni 1.5/sek dan tez chiqarmaydi, javob
+# esa ~6.5 sekund keladi, ya'ni barqaror holatda ~10 ta so'rov ochiq turadi.
+# 12 shu tabiiy darajadan bir oz yuqori — cheklamaydi, lekin portlashning
+# oldini oladi.
+_MAX_INFLIGHT = 12
 
 
 def _pick(row: dict[str, Any], *names: str, default: Any = "") -> Any:
@@ -193,11 +204,17 @@ class BillzGateway:
 
     def __init__(
         self, client: BillzClient, page_limit: int = _PAGE_LIMIT,
-        concurrency: int = _CONCURRENCY,
+        concurrency: int = _CONCURRENCY, max_inflight: int = _MAX_INFLIGHT,
     ) -> None:
         self._client = client
         self._page_limit = max(1, page_limit)
         self._concurrency = max(1, concurrency)
+        self._gate = asyncio.Semaphore(max(1, max_inflight))
+
+    async def _fetch(self, path: str, params: dict[str, Any]) -> Any:
+        """Bitta so'rov — umumiy ochiq so'rovlar chegarasi ostida."""
+        async with self._gate:
+            return await self._client.get(path, params)
 
     # ───────────────────────── sahifalash ─────────────────────────
 
@@ -229,7 +246,7 @@ class BillzGateway:
         while page <= _MAX_PAGES:
             batch = range(page, min(page + self._concurrency, _MAX_PAGES + 1))
             payloads = await asyncio.gather(*[
-                self._client.get(path, {**params, "page": p, "limit": limit})
+                self._fetch(path, {**params, "page": p, "limit": limit})
                 for p in batch
             ])
             finished = False
@@ -272,14 +289,21 @@ class BillzGateway:
 
         `dedupe_by` — qolgan takrorlanishlarga qarshi zaxira.
         """
-        collected: list[dict[str, Any]] = []
-        day = start
-        while day <= end:
-            iso = day.isoformat()
-            collected.extend(await self._paginate(
-                path, {**params, "start_date": iso, "end_date": iso}, *keys
-            ))
-            day += timedelta(days=1)
+        # Kunlar PARALLEL so'raladi. Ilgari ketma-ket edi va butun tekshiruv
+        # vaqtining yarmi shunga ketardi: 6 kun x ~13 sekund. Kunlar bir-biriga
+        # bog'liq emas, shuning uchun kutish vaqtlari ustma-ust tushishi mumkin.
+        # Umumiy ochiq so'rovlar soni `_MAX_INFLIGHT` bilan cheklangan, tezlik
+        # esa avvalgidek token-bucket ostida (1.5 so'rov/sek).
+        kunlar = [
+            (start + timedelta(days=offset)).isoformat()
+            for offset in range((end - start).days + 1)
+        ]
+        # gather natijalarni argument tartibida qaytaradi — kunlar tartibi saqlanadi
+        per_day = await asyncio.gather(*[
+            self._paginate(path, {**params, "start_date": iso, "end_date": iso}, *keys)
+            for iso in kunlar
+        ])
+        collected: list[dict[str, Any]] = [row for rows in per_day for row in rows]
 
         if not dedupe_by:
             return collected

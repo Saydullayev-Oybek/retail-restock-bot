@@ -355,8 +355,13 @@ Shundan uchta qaror kelib chiqadi:
 | `BILLZ_PAGE_LIMIT=1000` | Katta sahifa deyarli bepul — so'rovlar soni yarmiga tushadi |
 | `BILLZ_CONCURRENCY=4` | Sahifalar guruh-guruh so'raladi. Tezlik chegarasini **oshirmaydi** (token-bucket baribir 1.5 rps da ushlab turadi) — faqat Billz javobini kutish vaqtlari ustma-ust tushadi. Aks holda bot 0.3 rps da ishlaydi, Billz ruxsat bergan 2 dan olti barobar kam |
 | `STOCK_REFRESH_HOURS=6` | Qoldiq hisoboti sahifalarning ~57% i, lekin faqat "boshqa filialda bormi?" uchun kerak — bir necha soatlik eskilik zarar qilmaydi |
+| Kunlar parallel | Hisobotlar kun-kun so'raladi (jonli ma'lumot sababli), va kunlar bir-biriga bog'liq emas. Ilgari ular ketma-ket kutilardi va tekshiruv vaqtining yarmi shunga ketardi |
+| `_MAX_INFLIGHT=12` | Kunlar parallel bo'lgach ochiq so'rovlar soni portlamasligi uchun umumiy chegara. Token-bucket tezlikni baribir 1.5 rps da ushlab turadi |
 
-Natija (kunlik run, katalog keshda): **208s → 69s**.
+Natija (o'lchov, bir xil 94 so'rov, bir xil 127 nomzod): **168s → 81s**.
+Nazariy chegara — 94 / 1.5 rps = 63s, ya'ni endi deyarli tezlik chegarasida.
+Bundan tezroq qilishning yagona yo'li — so'rovlar sonini kamaytirish
+(masalan `STOCK_REFRESH_HOURS` ni oshirish: qoldiq 94 so'rovdan 28 tasi).
 
 ### Katalog to'liq tortilmaydi
 

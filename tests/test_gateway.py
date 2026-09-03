@@ -7,6 +7,7 @@ haqiqatan ishlashini va yetishmagan maydon istisno tashlamasligini qotiradi.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pytest
@@ -502,6 +503,65 @@ class TestDailyPagination:
             "/x", {}, "rows", start=date(2026, 8, 24), end=date(2026, 8, 27)
         )
         assert len(rows) == 1
+
+
+class TestDaysAreFetchedInParallel:
+    """Kunlar bir-biriga bog'liq emas — ketma-ket kutish behuda vaqt.
+
+    O'lchov (haqiqiy Billz, 6 kunlik oyna, 94 so'rov): ketma-ket 168 sekund,
+    parallel 81 sekund. Billz bitta sahifani ~6 sekund hisoblaydi, va vaqtning
+    yarmi shu kutishga ketardi.
+    """
+
+    class SlowClient:
+        """Har so'rov ozgina kechikadi — parallel ishlayotganini o'lchash uchun."""
+
+        def __init__(self, kechikish: float = 0.05) -> None:
+            self.kechikish = kechikish
+            self.ochiq = 0
+            self.eng_kop_ochiq = 0
+            self.jami = 0
+
+        async def get(self, path: str, params: dict) -> dict:
+            self.ochiq += 1
+            self.jami += 1
+            self.eng_kop_ochiq = max(self.eng_kop_ochiq, self.ochiq)
+            try:
+                await asyncio.sleep(self.kechikish)
+                return {"rows": [{"i": params["start_date"]}] if params["page"] == 1 else []}
+            finally:
+                self.ochiq -= 1
+
+    async def test_days_overlap_in_time(self) -> None:
+        client = self.SlowClient()
+        gateway = gw.BillzGateway(client, concurrency=1)  # type: ignore[arg-type]
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 25), end=date(2026, 8, 30)
+        )
+        assert len(rows) == 6
+        assert client.eng_kop_ochiq > 1, "kunlar ketma-ket so'ralyapti"
+
+    async def test_day_order_is_preserved(self) -> None:
+        """Parallel bo'lsa ham natija kunlar tartibida qaytishi kerak."""
+        client = self.SlowClient()
+        gateway = gw.BillzGateway(client, concurrency=1)  # type: ignore[arg-type]
+        rows = await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 25), end=date(2026, 8, 28)
+        )
+        assert [r["i"] for r in rows] == [
+            "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28",
+        ]
+
+    async def test_inflight_requests_are_capped(self) -> None:
+        """Billz'ning DDoS himoyasiga tegmaslik uchun umumiy chegara bor."""
+        client = self.SlowClient()
+        gateway = gw.BillzGateway(
+            client, concurrency=4, max_inflight=3,  # type: ignore[arg-type]
+        )
+        await gateway._paginate_by_day(
+            "/x", {}, "rows", start=date(2026, 8, 1), end=date(2026, 8, 31)
+        )
+        assert client.eng_kop_ochiq <= 3
 
 
 class TestSalesAreNotDeduped:
